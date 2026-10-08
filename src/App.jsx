@@ -144,10 +144,6 @@ export default function App() {
         // Role and shop lookups below run in the background; they no longer
         // hold the whole app behind two sequential network round trips.
         setAuthLoading(false);
-        // The session is known from local storage, so release the app shell now.
-        // Role and shop lookups below run in the background; they no longer
-        // hold the whole app behind two sequential network round trips.
-        setAuthLoading(false);
 
         // Start syncing while the staff/role lookup is in flight, rather than
         // making the page wait for those two network operations in sequence.
@@ -248,6 +244,8 @@ export default function App() {
   }
 
   const activeShop = organizationShops.find((shop) => shop.id === activeShopId) || null;
+  const activePageEntry = Object.entries(pages).find(([key]) => key === page) || Object.entries(pages)[0];
+  const ActivePageComponent = activePageEntry?.[1]?.component;
 
   return (
     <PowerSyncContext.Provider value={db}>
@@ -277,21 +275,20 @@ export default function App() {
           </aside>
           <header className="mobile-header"><span className="brand-mark">+</span><strong>Pharmacy POS</strong><button onClick={() => supabase.auth.signOut()}>Sign out</button></header>
           <main className="app-content">
-            {Object.entries(pages).filter(([key]) => visitedPages.has(key)).map(([key, item]) => {
-              const PageComponent = item.component;
-              return <div key={key} className="app-page-panel" hidden={page !== key} aria-hidden={page !== key}>
+            {ActivePageComponent ? (
+              <div className="app-page-panel" aria-live="polite">
                 <Suspense fallback={<div className="app-page-loading">Loading page…</div>}>
-                  <PageComponent
+                  <ActivePageComponent
                     activeShopId={activeShopId}
                     activeShopName={activeShop?.name || ''}
                     organizationShops={organizationShops}
                     onActiveShopChange={setActiveShopId}
                     dataVersion={dataVersion}
-                    isActive={page === key}
+                    isActive
                   />
                 </Suspense>
-              </div>;
-            })}
+              </div>
+            ) : null}
           </main>
           <nav className="mobile-nav" aria-label="Main navigation">
             {availablePages.map(([key, item]) => <button key={key} className={page === key ? 'active' : ''} onClick={() => navigateToPage(key)}><span className="nav-icon"><NavIcon name={item.icon} /></span>{item.label}</button>)}
