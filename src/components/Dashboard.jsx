@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
+import { useRefreshGate } from '../lib/useRefreshGate';
 import { supabase } from '../lib/supabaseClient';
 import { isAdminRole } from '../lib/roles';
 import { defaultBrandColor, applyBrandTheme } from '../lib/theme';
@@ -99,6 +100,8 @@ function movementLabel(movement, sourceShopNames = {}) {
 }
 
 export default function Dashboard({ activeShopId, activeShopName, organizationShops = [], onActiveShopChange, dataVersion = 0, isActive = true }) {
+  const gate = useRefreshGate(isActive, dataVersion);
+  const showingShopRef = useRef(null);
   const [allShops, setAllShops] = useState([]);
   const [selectedShopId, setSelectedShopId] = useState(null);
   const [shopName, setShopName] = useState('');
@@ -187,11 +190,11 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
 
   // Re-runs every time the selected shop changes (including the first load).
   useEffect(() => {
-    if (!selectedShopId || !isActive) return;
+    if (!selectedShopId || !gate) return;
     let cancelled = false;
     async function loadShopData() {
       try {
-        setLoading(true);
+        if (showingShopRef.current !== selectedShopId) setLoading(true);
         setError('');
 
         const today = startOfToday();
@@ -207,7 +210,10 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
         }
 
         // Allow the UI to render and stop the initial loading state.
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          showingShopRef.current = selectedShopId;
+          setLoading(false);
+        }
 
         // Phase 2: load less-critical / heavier datasets in the background.
         setLoadingMore(true);
@@ -334,7 +340,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
     }
     loadShopData();
     return () => { cancelled = true; };
-  }, [selectedShopId, dataVersion, isActive]);
+  }, [selectedShopId, gate]);
 
   const totalRevenue = useMemo(
     () => todaySales.reduce((total, sale) => total + Number(sale.total_amount), 0),
@@ -438,6 +444,3 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
     </section>
   </main>;
 }
-
-
-
