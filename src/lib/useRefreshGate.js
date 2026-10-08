@@ -7,15 +7,16 @@ import { useEffect, useRef, useState } from 'react';
 // already has instead of showing "Loading…" on every visit. If data changes
 // while the page is hidden, the page refetches the next time it is opened.
 export function useRefreshGate(isActive, dataVersion) {
-const [gate, setGate] = useState(0); const seenVersion = useRef(null);
+  const [gate, setGate] = useState(0);
+  const seenVersion = useRef(null);
 
-useEffect(() => {
+  useEffect(() => {
     if (!isActive) return;
     if (seenVersion.current === null || seenVersion.current !== dataVersion) {
-    seenVersion.current = dataVersion;
-    setGate((value) => value + 1);
+      seenVersion.current = dataVersion;
+      setGate((value) => value + 1);
     }
-}, [isActive, dataVersion]);
+  }, [isActive, dataVersion]);
 
-return gate;
+  return gate;
 }
