@@ -33,6 +33,27 @@ function batchOptionLabel(batch) {
   return `${batch.batch_number || 'No batch number'} - exp ${batch.expiry_date} - ${batch.quantity_remaining} units`;
 }
 
+function priceSummary(batches) {
+  const prices = [...new Set((batches || []).map((batch) => Number(batch.selling_price || 0)).filter((price) => price > 0))].sort((a, b) => a - b);
+  if (!prices.length) return formatCurrency(0);
+  if (prices.length === 1) return formatCurrency(prices[0]);
+  return `${formatCurrency(prices[0])} - ${formatCurrency(prices[prices.length - 1])}`;
+}
+
+async function attachSupplierNames(batches) {
+  const supplierIds = [...new Set((batches || []).map((batch) => batch.supplier_id).filter(Boolean))];
+  if (!supplierIds.length) return batches || [];
+
+  try {
+    const { data, error } = await supabase.from('suppliers').select('id, name').in('id', supplierIds);
+    if (error) return batches || [];
+    const names = Object.fromEntries((data || []).map((supplier) => [supplier.id, supplier.name]));
+    return (batches || []).map((batch) => ({ ...batch, supplier_name: names[batch.supplier_id] || '' }));
+  } catch {
+    return batches || [];
+  }
+}
+
 export default function StockedDrugs({ activeShopId, organizationShops = [], onActiveShopChange }) {
   const [staff, setStaff] = useState(null);
   const [allShops, setAllShops] = useState([]);
@@ -139,7 +160,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
             .eq('shop_id', selectedShopId)
             .order('drug_id'),
           supabase.from('batches')
-            .select('id, drug_id, supplier_id, batch_number, expiry_date, cost_price, selling_price, quantity_remaining, suppliers(name)')
+            .select('id, drug_id, supplier_id, batch_number, expiry_date, cost_price, selling_price, quantity_remaining')
             .eq('shop_id', selectedShopId)
             .gt('quantity_remaining', 0)
             .order('expiry_date', { ascending: true }),
@@ -148,8 +169,10 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
         if (shopDrugsResult.error) throw shopDrugsResult.error;
         if (batchesResult.error) throw batchesResult.error;
 
+        const batchesWithSuppliers = await attachSupplierNames(batchesResult.data || []);
+
         const batchesByDrug = {};
-        for (const batch of batchesResult.data || []) {
+        for (const batch of batchesWithSuppliers) {
           if (!batchesByDrug[batch.drug_id]) batchesByDrug[batch.drug_id] = [];
           batchesByDrug[batch.drug_id].push(batch);
         }
@@ -284,14 +307,16 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
   async function refreshCurrentStock() {
     const { data: refreshedBatches, error: refreshError } = await supabase
       .from('batches')
-      .select('id, drug_id, supplier_id, batch_number, expiry_date, cost_price, selling_price, quantity_remaining, suppliers(name)')
+      .select('id, drug_id, supplier_id, batch_number, expiry_date, cost_price, selling_price, quantity_remaining')
       .eq('shop_id', selectedShopId)
       .gt('quantity_remaining', 0)
       .order('expiry_date', { ascending: true });
     if (refreshError) throw refreshError;
 
+    const refreshedWithSuppliers = await attachSupplierNames(refreshedBatches || []);
+
     const batchesByDrug = {};
-    for (const batch of refreshedBatches || []) {
+    for (const batch of refreshedWithSuppliers) {
       if (!batchesByDrug[batch.drug_id]) batchesByDrug[batch.drug_id] = [];
       batchesByDrug[batch.drug_id].push(batch);
     }
@@ -441,7 +466,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
                       {item.batches.map((batch) => (
                         <div key={batch.id} className={isExpiredBatch(batch) ? 'batch-chip expired' : 'batch-chip'}>
                           <span>Batch {batch.batch_number || 'N/A'}</span>
-                          <span>{batch.suppliers?.name || 'Supplier not recorded'}</span>
+                          <span>{batch.supplier_name || 'Supplier not recorded'}</span>
                           <span>Exp {batch.expiry_date}</span>
                           <span>{Number(batch.quantity_remaining || 0)} units</span>
                           <strong>{formatCurrency(batch.selling_price)}</strong>
