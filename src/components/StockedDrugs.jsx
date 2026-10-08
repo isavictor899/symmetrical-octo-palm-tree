@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
+import { useRefreshGate } from '../lib/useRefreshGate';
 import { supabase } from '../lib/supabaseClient';
 import { canManageStockedDrugs, isAdminRole } from '../lib/roles';
 
@@ -55,6 +56,8 @@ async function attachSupplierNames(batches) {
 }
 
 export default function StockedDrugs({ activeShopId, organizationShops = [], onActiveShopChange, dataVersion = 0, isActive = true }) {
+  const gate = useRefreshGate(isActive, dataVersion);
+  const showingShopRef = useRef(null);
   const [staff, setStaff] = useState(null);
   const [allShops, setAllShops] = useState([]);
   const [selectedShopId, setSelectedShopId] = useState(null);
@@ -147,12 +150,12 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
   }, [activeShopId, organizationShops]);
 
   useEffect(() => {
-    if (!selectedShopId || !isActive) return undefined;
+    if (!selectedShopId || !gate) return undefined;
     let cancelled = false;
 
     async function loadStock() {
       try {
-        setLoadingStock(true);
+        if (showingShopRef.current !== selectedShopId) setLoadingStock(true);
         setError('');
 
         const [shopDrugsResult, batchesResult] = await Promise.all([
@@ -169,6 +172,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
 
         if (shopDrugsResult.error) throw shopDrugsResult.error;
         if (batchesResult.error) throw batchesResult.error;
+        showingShopRef.current = selectedShopId;
 
         const batchesWithSuppliers = await attachSupplierNames(batchesResult.data || []);
 
@@ -211,7 +215,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
 
     loadStock();
     return () => { cancelled = true; };
-  }, [selectedShopId, dataVersion, isActive]);
+  }, [selectedShopId, gate]);
 
   function openClassificationEditor(item) {
     setEditingDrug(item);
@@ -674,6 +678,3 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
     </div>
   );
 }
-
-
-

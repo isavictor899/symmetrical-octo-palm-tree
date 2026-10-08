@@ -19,9 +19,12 @@ export default function Settings() {
 
     async function loadSettings() {
       try {
-        const { data: userData, error: userError } = await supabase.auth.getUser();
+        // getSession reads the signed-in user from local storage, so this does not
+        // add a network round trip. Row-level security still protects the data.
+        const { data: sessionData, error: userError } = await supabase.auth.getSession();
         if (userError) throw userError;
-        if (!userData.user) throw new Error('Please sign in to edit shop settings.');
+        if (!sessionData.session?.user) throw new Error('Please sign in to edit shop settings.');
+        const userData = { user: sessionData.session.user };
 
         const [staffResult, shopsResult] = await Promise.all([
           supabase.from('staff')

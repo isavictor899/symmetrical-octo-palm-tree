@@ -44,7 +44,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
   // query-like value and calling it with `null` can change the internal
   // hook ordering and cause React hook order errors.
   const { data: batchRows } = useQuery(
-    effectiveShopId
+    effectiveShopId && isActive
       ? `SELECT batches.id, batches.drug_id, batches.batch_number, batches.expiry_date,
                 batches.selling_price, batches.quantity_remaining,
                 drugs.name, drugs.generic_name,
@@ -57,7 +57,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
          WHERE batches.shop_id = ? AND batches.quantity_remaining > 0
          ORDER BY batches.expiry_date ASC`
       : 'SELECT 1 WHERE 0',
-    effectiveShopId ? [effectiveShopId] : []
+    effectiveShopId && isActive ? [effectiveShopId] : []
   );
 
   // Every sale still sitting in the local queue, unsynced â€” used for two
@@ -65,7 +65,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
   // of each batch's synced stock is already spoken for by a sale that
   // hasn't reached the server yet. Without this, a second offline sale of
   // the same batch has no way to know the first one already happened.
-  const { data: pendingItemsRows } = useQuery('SELECT id, items_json, status, last_error FROM pending_sales');
+  const { data: pendingItemsRows } = useQuery(isActive ? 'SELECT id, items_json, status, last_error FROM pending_sales' : 'SELECT 1 WHERE 0');
   const waitingSales = (pendingItemsRows || []).filter((row) => !row.status || row.status === 'pending');
   const failedSales = (pendingItemsRows || []).filter((row) => row.status === 'failed');
   const pendingCount = waitingSales.length;
@@ -523,6 +523,3 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
     </div>
   );
 }
-
-
-

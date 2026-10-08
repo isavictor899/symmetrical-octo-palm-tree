@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
+import { useRefreshGate } from '../lib/useRefreshGate';
 import { supabase } from '../lib/supabaseClient';
 import { isAdminRole } from '../lib/roles';
 import './MonthlyReport.css';
@@ -82,6 +83,8 @@ function emptyShopReport(shop) {
 }
 
 export default function MonthlyReport({ organizationShops = [], dataVersion = 0, isActive = true }) {
+  const gate = useRefreshGate(isActive, dataVersion);
+  const showingMonthRef = useRef(null);
   const [month, setMonth] = useState(currentMonthValue());
   const [shops, setShops] = useState(organizationShops);
   const [sales, setSales] = useState([]);
@@ -97,12 +100,12 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
   }, [organizationShops]);
 
   useEffect(() => {
-    if (!isActive) return undefined;
+    if (!gate) return undefined;
     let cancelled = false;
 
     async function loadReport() {
       try {
-        setLoading(true);
+        if (showingMonthRef.current !== month) setLoading(true);
         setError('');
 
         let reportShops = organizationShops;
@@ -158,6 +161,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
         ]);
 
         if (salesResult.error) throw salesResult.error;
+        showingMonthRef.current = month;
         if (saleItemsResult.error) throw saleItemsResult.error;
         if (inventoryResult.error) throw inventoryResult.error;
 
@@ -205,7 +209,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
 
     loadReport();
     return () => { cancelled = true; };
-  }, [month, organizationShops, dataVersion, isActive]);
+  }, [month, organizationShops, gate]);
 
   const report = useMemo(() => {
     const shopMap = new Map(shops.map((shop) => [shop.id, emptyShopReport(shop)]));
@@ -381,4 +385,3 @@ function DrugPanel({ title, rows, empty, showAmount = false, amountLabel = 'Sale
     </article>
   );
 }
-

@@ -11,7 +11,7 @@ const initialForm = {
   costPrice: '', sellingPrice: '', quantity: '', initialRequiresPrescription: '',
 };
 
-export default function ReceiveStock({ activeShopId, activeShopName }) {
+export default function ReceiveStock({ activeShopId, activeShopName, isActive = true }) {
   const db = usePowerSync();
   const syncStatus = useStatus();
   const minExpiryDate = new Date().toISOString().slice(0, 10);
@@ -46,14 +46,14 @@ export default function ReceiveStock({ activeShopId, activeShopName }) {
   // A harmless placeholder query is used until staff resolves, so the hook
   // is never called with null (that can break hook ordering).
   const { data: myDrugs } = useQuery(
-    effectiveShopId
+    effectiveShopId && isActive
       ? `SELECT drugs.id, drugs.name, drugs.generic_name, shop_drugs.requires_prescription
          FROM shop_drugs
          JOIN drugs ON drugs.id = shop_drugs.drug_id
          WHERE shop_drugs.shop_id = ?
          ORDER BY drugs.name`
       : 'SELECT 1 WHERE 0',
-    effectiveShopId ? [effectiveShopId] : []
+    effectiveShopId && isActive ? [effectiveShopId] : []
   );
 
   const [searchFullCatalog, setSearchFullCatalog] = useState(false);
@@ -61,12 +61,12 @@ export default function ReceiveStock({ activeShopId, activeShopName }) {
   const [selectedDrug, setSelectedDrug] = useState(null);
   const catalogTerm = catalogSearch.trim();
   const { data: catalogResults } = useQuery(
-    searchFullCatalog && catalogTerm
+    isActive && searchFullCatalog && catalogTerm
       ? `SELECT id, name, generic_name FROM drugs
          WHERE name LIKE ? OR generic_name LIKE ?
          ORDER BY name LIMIT 50`
       : 'SELECT 1 WHERE 0',
-    searchFullCatalog && catalogTerm ? [`%${catalogTerm}%`, `%${catalogTerm}%`] : []
+    isActive && searchFullCatalog && catalogTerm ? [`%${catalogTerm}%`, `%${catalogTerm}%`] : []
   );
 
   const myDrugOptions = selectedDrug && !(myDrugs || []).some((d) => d.id === selectedDrug.id)
@@ -78,15 +78,17 @@ export default function ReceiveStock({ activeShopId, activeShopName }) {
     setSelectedDrug(drug);
   }
 
-  const { data: suppliers } = useQuery('SELECT id, name FROM suppliers ORDER BY name');
+  const { data: suppliers } = useQuery(isActive ? 'SELECT id, name FROM suppliers ORDER BY name' : 'SELECT 1 WHERE 0');
   const { data: pendingRows } = useQuery(
-    'SELECT id, shop_id, drug_id, initial_requires_prescription, status, last_error FROM pending_receipts'
+    isActive
+      ? 'SELECT id, shop_id, drug_id, initial_requires_prescription, status, last_error FROM pending_receipts'
+      : 'SELECT 1 WHERE 0'
   );
   const { data: selectedShopDrugRows } = useQuery(
-    effectiveShopId && form.drugId
+    effectiveShopId && form.drugId && isActive
       ? 'SELECT requires_prescription FROM shop_drugs WHERE shop_id = ? AND drug_id = ? LIMIT 1'
       : 'SELECT 1 WHERE 0',
-    effectiveShopId && form.drugId ? [effectiveShopId, form.drugId] : []
+    effectiveShopId && form.drugId && isActive ? [effectiveShopId, form.drugId] : []
   );
   const waitingReceipts = (pendingRows || []).filter((row) => !row.status || row.status === 'pending');
   const failedReceipts = (pendingRows || []).filter((row) => row.status === 'failed');
