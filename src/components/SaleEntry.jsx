@@ -19,7 +19,7 @@ function pickFefoBatch(drug) {
   return [...sellable].sort((a, b) => new Date(a.expiry_date) - new Date(b.expiry_date))[0];
 }
 
-export default function SaleEntry({ activeShopId, activeShopName }) {
+export default function SaleEntry({ activeShopId, activeShopName, isActive = true }) {
   const db = usePowerSync();
   const syncStatus = useStatus(); // { connected, ... } ” lets us show online/offline
 
@@ -137,9 +137,12 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
       );
   }, [query, drugs]);
 
+  const localStockCount = (batchRows || []).length;
+
   useEffect(() => {
     const term = query.trim();
-    if (!term || !effectiveShopId || results.length > 0 || !syncStatus.connected) {
+    const localStockHasLoaded = localStockCount > 0;
+    if (!isActive || !term || !effectiveShopId || results.length > 0 || localStockHasLoaded || !syncStatus.connected) {
       setRemoteResults([]);
       setRemoteSearchLoading(false);
       return undefined;
@@ -207,13 +210,13 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
       } finally {
         if (!cancelled) setRemoteSearchLoading(false);
       }
-    }, 250);
+    }, 600);
 
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [query, effectiveShopId, results.length, syncStatus.connected, pendingQtyByBatch]);
+  }, [query, effectiveShopId, results.length, syncStatus.connected, pendingQtyByBatch, localStockCount, isActive]);
 
   const visibleResults = results.length ? results : remoteResults;
 
@@ -520,5 +523,6 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
     </div>
   );
 }
+
 
 

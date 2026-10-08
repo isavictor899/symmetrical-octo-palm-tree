@@ -279,6 +279,7 @@ export default function App() {
                     organizationShops={organizationShops}
                     onActiveShopChange={setActiveShopId}
                     dataVersion={dataVersion}
+                    isActive={page === key}
                   />
                 </Suspense>
               </div>;

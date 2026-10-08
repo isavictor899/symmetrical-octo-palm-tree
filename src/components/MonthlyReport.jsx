@@ -81,7 +81,7 @@ function emptyShopReport(shop) {
   };
 }
 
-export default function MonthlyReport({ organizationShops = [], dataVersion = 0 }) {
+export default function MonthlyReport({ organizationShops = [], dataVersion = 0, isActive = true }) {
   const [month, setMonth] = useState(currentMonthValue());
   const [shops, setShops] = useState(organizationShops);
   const [sales, setSales] = useState([]);
@@ -97,6 +97,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0 
   }, [organizationShops]);
 
   useEffect(() => {
+    if (!isActive) return undefined;
     let cancelled = false;
 
     async function loadReport() {
@@ -204,7 +205,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0 
 
     loadReport();
     return () => { cancelled = true; };
-  }, [month, organizationShops, dataVersion]);
+  }, [month, organizationShops, dataVersion, isActive]);
 
   const report = useMemo(() => {
     const shopMap = new Map(shops.map((shop) => [shop.id, emptyShopReport(shop)]));

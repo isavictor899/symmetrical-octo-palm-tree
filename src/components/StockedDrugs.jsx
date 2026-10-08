@@ -54,7 +54,7 @@ async function attachSupplierNames(batches) {
   }
 }
 
-export default function StockedDrugs({ activeShopId, organizationShops = [], onActiveShopChange, dataVersion = 0 }) {
+export default function StockedDrugs({ activeShopId, organizationShops = [], onActiveShopChange, dataVersion = 0, isActive = true }) {
   const [staff, setStaff] = useState(null);
   const [allShops, setAllShops] = useState([]);
   const [selectedShopId, setSelectedShopId] = useState(null);
@@ -147,7 +147,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
   }, [activeShopId, organizationShops]);
 
   useEffect(() => {
-    if (!selectedShopId) return undefined;
+    if (!selectedShopId || !isActive) return undefined;
     let cancelled = false;
 
     async function loadStock() {
@@ -211,7 +211,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
 
     loadStock();
     return () => { cancelled = true; };
-  }, [selectedShopId, dataVersion]);
+  }, [selectedShopId, dataVersion, isActive]);
 
   function openClassificationEditor(item) {
     setEditingDrug(item);

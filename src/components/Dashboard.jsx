@@ -98,7 +98,7 @@ function movementLabel(movement, sourceShopNames = {}) {
   return 'Received from supplier';
 }
 
-export default function Dashboard({ activeShopId, activeShopName, organizationShops = [], onActiveShopChange, dataVersion = 0 }) {
+export default function Dashboard({ activeShopId, activeShopName, organizationShops = [], onActiveShopChange, dataVersion = 0, isActive = true }) {
   const [allShops, setAllShops] = useState([]);
   const [selectedShopId, setSelectedShopId] = useState(null);
   const [shopName, setShopName] = useState('');
@@ -187,7 +187,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
 
   // Re-runs every time the selected shop changes (including the first load).
   useEffect(() => {
-    if (!selectedShopId) return;
+    if (!selectedShopId || !isActive) return;
     let cancelled = false;
     async function loadShopData() {
       try {
@@ -334,7 +334,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
     }
     loadShopData();
     return () => { cancelled = true; };
-  }, [selectedShopId, dataVersion]);
+  }, [selectedShopId, dataVersion, isActive]);
 
   const totalRevenue = useMemo(
     () => todaySales.reduce((total, sale) => total + Number(sale.total_amount), 0),
