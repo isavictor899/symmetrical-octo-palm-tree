@@ -131,6 +131,9 @@
 
 .mini-badge.pom { color: var(--danger); background: var(--danger-bg); }
 .mini-badge.danger { color: var(--warning); background: var(--warning-bg); }
+.mini-badge.price-tier { color: var(--brand-primary); background: var(--brand-tint); }
+.product-price { display: grid; justify-items: end; gap: 2px; }
+.product-price small { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; }
 
 /* ── Cart / checkout ─────────────────────────────────────────── */
 .checkout-pane {
@@ -364,3 +367,4 @@
   .checkout-pane { padding: 12px 12px 0; }
 
 }
+

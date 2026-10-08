@@ -10,7 +10,7 @@ function formatKes(n) {
 }
 
 // First-Expiry-First-Out: among in-stock, non-expired batches, pick the
-// one expiring soonest. This is a UX convenience only — sell_stock enforces
+// one expiring soonest. This is a UX convenience only â€” sell_stock enforces
 // the real expiry check server-side regardless of what this picks.
 function pickFefoBatch(drug) {
   const today = new Date().toISOString().slice(0, 10);
@@ -21,7 +21,7 @@ function pickFefoBatch(drug) {
 
 export default function SaleEntry({ activeShopId, activeShopName }) {
   const db = usePowerSync();
-  const syncStatus = useStatus(); // { connected, ... } — lets us show online/offline
+  const syncStatus = useStatus(); // { connected, ... } â€” lets us show online/offline
 
   // Local-first staff lookup, shared with ReceiveStock. keepTrying: keep
   // fetching from the server in the background until the row arrives.
@@ -37,10 +37,10 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
 
   // Reactive local query: joins batches + drugs from the local SQLite
   // database, scoped to this shop. Automatically re-runs whenever the
-  // underlying local data changes (a sync pulling in fresh stock, etc.) —
+  // underlying local data changes (a sync pulling in fresh stock, etc.) â€”
   // no manual refetching needed.
   // When staffInfo is not yet resolved, pass a harmless placeholder query
-  // instead of null — some versions of the PowerSync hook expect a valid
+  // instead of null â€” some versions of the PowerSync hook expect a valid
   // query-like value and calling it with `null` can change the internal
   // hook ordering and cause React hook order errors.
   const { data: batchRows } = useQuery(
@@ -60,7 +60,7 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
     effectiveShopId ? [effectiveShopId] : []
   );
 
-  // Every sale still sitting in the local queue, unsynced — used for two
+  // Every sale still sitting in the local queue, unsynced â€” used for two
   // things: the "waiting to sync" count, and (below) figuring out how much
   // of each batch's synced stock is already spoken for by a sale that
   // hasn't reached the server yet. Without this, a second offline sale of
@@ -120,14 +120,17 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
   const results = useMemo(() => {
     if (!query.trim()) return [];
     const q = query.toLowerCase();
-    return drugs.filter(
-      (d) => d.name.toLowerCase().includes(q) || (d.generic_name || '').toLowerCase().includes(q)
-    );
+    const today = new Date().toISOString().slice(0, 10);
+    return drugs
+      .filter((d) => d.name.toLowerCase().includes(q) || (d.generic_name || '').toLowerCase().includes(q))
+      .flatMap((drug) => drug.batches
+        .map((batch) => ({ drug, batch, expired: batch.expiry_date < today }))
+        .sort((a, b) => new Date(a.batch.expiry_date) - new Date(b.batch.expiry_date))
+      );
   }, [query, drugs]);
 
-  function addToCart(drug) {
-    const batch = pickFefoBatch(drug);
-    if (!batch) return;
+  function addToCart(drug, batch) {
+    if (!batch || batch.available <= 0 || batch.expiry_date < new Date().toISOString().slice(0, 10)) return;
     setCart((prev) => {
       const existing = prev.find((line) => line.batch.id === batch.id);
       if (existing) {
@@ -163,7 +166,7 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
 
   const total = cart.reduce((sum, line) => sum + line.qty * line.batch.selling_price, 0);
 
-  // Writes the sale into the LOCAL pending_sales queue — works offline.
+  // Writes the sale into the LOCAL pending_sales queue â€” works offline.
   // The connector picks it up and calls sell_stock automatically once
   // there's connectivity; nothing here calls Supabase directly.
   async function checkout() {
@@ -236,7 +239,7 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
         </div>
         <div className="pos-header-actions">
           <button type="button" className="button secondary" onClick={() => retryFetchStaff()}>
-            {retrying ? 'Retrying…' : 'Retry staff sync'}
+            {retrying ? 'Retryingâ€¦' : 'Retry staff sync'}
           </button>
           <button type="button" className="button ghost" onClick={() => supabase.auth.signOut()}>
             Sign out
@@ -260,23 +263,20 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search drug by name or generic…"
+            placeholder="Search drug by name or genericâ€¦"
           />
 
           {query.trim() && results.length === 0 && (
             <div className="empty-state">No matches for "{query}".</div>
           )}
 
-          {results.map((drug) => {
-            const batch = pickFefoBatch(drug);
-            const today = new Date().toISOString().slice(0, 10);
-            const hasExpiredOnly = !batch && drug.batches.some((b) => b.available > 0 && b.expiry_date < today);
-            const lowStock = batch && batch.available <= 25;
+          {results.map(({ drug, batch, expired }) => {
+            const lowStock = !expired && batch.available <= 25;
             return (
               <button
-                key={drug.id}
-                onClick={() => addToCart(drug)}
-                disabled={!batch}
+                key={batch.id}
+                onClick={() => addToCart(drug, batch)}
+                disabled={expired || batch.available <= 0}
                 className="product-row"
               >
                 <div>
@@ -284,28 +284,27 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
                     {drug.name}
                     {drug.requiresPrescription === true && <span className="mini-badge pom">POM</span>}
                     {drug.requiresPrescription === null && <span className="mini-badge danger">Unclassified</span>}
+                    <span className="mini-badge price-tier">{formatKes(Number(batch.selling_price || 0))}</span>
                   </div>
                   <div className="product-meta">
-                    {drug.generic_name}
-                    {batch && (
-                      <>
-                        {' · '}batch {batch.batch_number} · exp {batch.expiry_date}
-                        {lowStock && <span className="status-warning"> · {batch.available} left</span>}
-                      </>
-                    )}
-                    {!batch && (hasExpiredOnly
-                      ? <span className="status-warning"> · expired, needs write-off</span>
-                      : ' · out of stock')}
+                    {drug.generic_name || 'No generic name'}
+                    {' · '}batch {batch.batch_number || 'N/A'} · exp {batch.expiry_date}
+                    {' · '}{batch.available} available
+                    {lowStock && <span className="status-warning"> · low stock</span>}
+                    {expired && <span className="status-warning"> · expired, needs write-off</span>}
                   </div>
                 </div>
-                {batch && <div className="product-price tnum">{formatKes(batch.selling_price)}</div>}
+                <div className="product-price tnum">
+                  {formatKes(Number(batch.selling_price || 0))}
+                  <small>Batch line</small>
+                </div>
               </button>
             );
           })}
 
           {!query.trim() && (
             <div className="empty-state">
-              Start typing to find a drug. The soonest-to-expire batch with stock is added automatically.
+              Start typing to find a drug. Each batch and price appears separately so you can choose the exact stock line.
             </div>
           )}
         </section>
@@ -319,11 +318,11 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
               <div key={line.batch.id} className="cart-line">
                 <div>
                   <div className="cart-drug">{line.drugName}</div>
-                  <div className="cart-meta">Batch {line.batch.batch_number || 'N/A'} · exp {line.batch.expiry_date}</div>
+                  <div className="cart-meta">Batch {line.batch.batch_number || 'N/A'} Â· exp {line.batch.expiry_date}</div>
                   <div className="cart-meta">{formatKes(line.batch.selling_price)} each</div>
                 </div>
                 <div className="cart-controls">
-                  <button type="button" onClick={() => updateQty(line.batch.id, -1)}>−</button>
+                  <button type="button" onClick={() => updateQty(line.batch.id, -1)}>âˆ’</button>
                   <span className="tnum">{line.qty}</span>
                   <button type="button" onClick={() => updateQty(line.batch.id, 1)}>+</button>
                   <strong className="tnum">{formatKes(line.qty * line.batch.selling_price)}</strong>
@@ -371,7 +370,7 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
               onClick={checkout}
               disabled={cart.length === 0 || status === 'submitting' || cartHasUnclassifiedDrug}
             >
-              {status === 'submitting' ? 'Recording sale…' : 'Complete sale'}
+              {status === 'submitting' ? 'Recording saleâ€¦' : 'Complete sale'}
             </button>
 
             {checkoutError && <div className="inline-error">{checkoutError}</div>}

@@ -139,7 +139,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
             .eq('shop_id', selectedShopId)
             .order('drug_id'),
           supabase.from('batches')
-            .select('id, drug_id, supplier_id, batch_number, expiry_date, cost_price, selling_price, quantity_remaining')
+            .select('id, drug_id, supplier_id, batch_number, expiry_date, cost_price, selling_price, quantity_remaining, suppliers(name)')
             .eq('shop_id', selectedShopId)
             .gt('quantity_remaining', 0)
             .order('expiry_date', { ascending: true }),
@@ -284,7 +284,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
   async function refreshCurrentStock() {
     const { data: refreshedBatches, error: refreshError } = await supabase
       .from('batches')
-      .select('id, drug_id, supplier_id, batch_number, expiry_date, cost_price, selling_price, quantity_remaining')
+      .select('id, drug_id, supplier_id, batch_number, expiry_date, cost_price, selling_price, quantity_remaining, suppliers(name)')
       .eq('shop_id', selectedShopId)
       .gt('quantity_remaining', 0)
       .order('expiry_date', { ascending: true });
@@ -427,7 +427,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
                 <th>Classification</th>
                 <th>Units</th>
                 <th>Next expiry</th>
-                <th>Latest selling price</th>
+                <th>Batch prices</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -437,6 +437,17 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
                   <td>
                     <strong>{item.name}</strong>
                     {item.generic_name ? <div className="muted small">{item.generic_name}</div> : null}
+                    <div className="batch-stack">
+                      {item.batches.map((batch) => (
+                        <div key={batch.id} className={isExpiredBatch(batch) ? 'batch-chip expired' : 'batch-chip'}>
+                          <span>Batch {batch.batch_number || 'N/A'}</span>
+                          <span>{batch.suppliers?.name || 'Supplier not recorded'}</span>
+                          <span>Exp {batch.expiry_date}</span>
+                          <span>{Number(batch.quantity_remaining || 0)} units</span>
+                          <strong>{formatCurrency(batch.selling_price)}</strong>
+                        </div>
+                      ))}
+                    </div>
                   </td>
                   <td>{[item.strength, item.form].filter(Boolean).join(' / ') || '-'}</td>
                   <td><span className={classificationClass(item.requires_prescription)}>{classificationLabel(item.requires_prescription)}</span></td>
@@ -448,7 +459,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
                     {item.soonest_expiry ? new Date(item.soonest_expiry).toLocaleDateString('en-KE') : '-'}
                     {item.expired_units > 0 ? <div className="muted small critical">Expired stock present</div> : null}
                   </td>
-                  <td>{formatCurrency(item.latest_price)}</td>
+                  <td>{priceSummary(item.batches)}</td>
                   <td>
                     <div className="table-actions">
                       <button type="button" className="table-action" onClick={() => openClassificationEditor(item)}>
@@ -621,4 +632,5 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
     </div>
   );
 }
+
 
