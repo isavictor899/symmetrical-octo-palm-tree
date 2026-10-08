@@ -98,7 +98,7 @@ function movementLabel(movement, sourceShopNames = {}) {
   return 'Received from supplier';
 }
 
-export default function Dashboard({ activeShopId, activeShopName, organizationShops = [], onActiveShopChange }) {
+export default function Dashboard({ activeShopId, activeShopName, organizationShops = [], onActiveShopChange, dataVersion = 0 }) {
   const [allShops, setAllShops] = useState([]);
   const [selectedShopId, setSelectedShopId] = useState(null);
   const [shopName, setShopName] = useState('');
@@ -334,7 +334,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
     }
     loadShopData();
     return () => { cancelled = true; };
-  }, [selectedShopId]);
+  }, [selectedShopId, dataVersion]);
 
   const totalRevenue = useMemo(
     () => todaySales.reduce((total, sale) => total + Number(sale.total_amount), 0),
@@ -438,5 +438,6 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
     </section>
   </main>;
 }
+
 
 

@@ -159,6 +159,11 @@ export default function ReceiveStock({ activeShopId, activeShopName }) {
       );
       await flushAll(db);
       const remaining = await db.getAll('SELECT status FROM pending_receipts WHERE id = ?', [localId]);
+      if (!remaining.length) {
+        window.dispatchEvent(new CustomEvent('pharmacy-pos:data-changed', {
+          detail: { type: 'receipt', shopId: effectiveShopId },
+        }));
+      }
       setMessage(remaining[0]?.status === 'failed'
         ? 'Receipt saved on this device but rejected by the server. See the details above.'
         : remaining.length

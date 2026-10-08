@@ -81,7 +81,7 @@ function emptyShopReport(shop) {
   };
 }
 
-export default function MonthlyReport({ organizationShops = [] }) {
+export default function MonthlyReport({ organizationShops = [], dataVersion = 0 }) {
   const [month, setMonth] = useState(currentMonthValue());
   const [shops, setShops] = useState(organizationShops);
   const [sales, setSales] = useState([]);
@@ -204,7 +204,7 @@ export default function MonthlyReport({ organizationShops = [] }) {
 
     loadReport();
     return () => { cancelled = true; };
-  }, [month, organizationShops]);
+  }, [month, organizationShops, dataVersion]);
 
   const report = useMemo(() => {
     const shopMap = new Map(shops.map((shop) => [shop.id, emptyShopReport(shop)]));
@@ -380,3 +380,4 @@ function DrugPanel({ title, rows, empty, showAmount = false, amountLabel = 'Sale
     </article>
   );
 }
+

@@ -90,6 +90,7 @@ export default function App() {
   const [staffRole, setStaffRole] = useState(null);
   const [organizationShops, setOrganizationShops] = useState([]);
   const [activeShopId, setActiveShopId] = useState(null);
+  const [dataVersion, setDataVersion] = useState(0);
   const lastSessionUserId = useRef(null);
   const lastSetupUserId = useRef(null);
 
@@ -142,7 +143,7 @@ export default function App() {
 
         // Start syncing while the staff/role lookup is in flight, rather than
         // making the page wait for those two network operations in sequence.
-        db.connect(connector)
+        db.connect(connector, { checkpointMode: 'requests' })
           .then(() => flushAll(db))
           .catch((err) => console.error('PowerSync connect failed:', err));
 
@@ -195,6 +196,12 @@ export default function App() {
       setSessionAndRole(nextSession);
     });
     return () => listener.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const handleDataChanged = () => setDataVersion((version) => version + 1);
+    window.addEventListener('pharmacy-pos:data-changed', handleDataChanged);
+    return () => window.removeEventListener('pharmacy-pos:data-changed', handleDataChanged);
   }, []);
 
   useEffect(() => {
@@ -271,6 +278,7 @@ export default function App() {
                     activeShopName={activeShop?.name || ''}
                     organizationShops={organizationShops}
                     onActiveShopChange={setActiveShopId}
+                    dataVersion={dataVersion}
                   />
                 </Suspense>
               </div>;
@@ -284,5 +292,6 @@ export default function App() {
     </PowerSyncContext.Provider>
   );
 }
+
 
 

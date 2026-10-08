@@ -70,6 +70,8 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
   const failedSales = (pendingItemsRows || []).filter((row) => row.status === 'failed');
   const pendingCount = waitingSales.length;
 
+  const [recentSoldQtyByBatch, setRecentSoldQtyByBatch] = useState({});
+
   const pendingQtyByBatch = useMemo(() => {
     const map = {};
     for (const row of waitingSales) {
@@ -88,7 +90,11 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
   const drugs = useMemo(() => {
     const byDrug = {};
     for (const b of batchRows || []) {
-      const available = b.quantity_remaining - (pendingQtyByBatch[b.id] || 0);
+      const recentSale = recentSoldQtyByBatch[b.id];
+      const recentSold = recentSale && Number(b.quantity_remaining || 0) >= Number(recentSale.originalQuantity || 0)
+        ? Number(recentSale.quantity || 0)
+        : 0;
+      const available = b.quantity_remaining - (pendingQtyByBatch[b.id] || 0) - recentSold;
       if (!byDrug[b.drug_id]) {
         byDrug[b.drug_id] = {
           id: b.drug_id,
@@ -103,7 +109,7 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
       byDrug[b.drug_id].batches.push({ ...b, available });
     }
     return Object.values(byDrug);
-  }, [batchRows, pendingQtyByBatch]);
+  }, [batchRows, pendingQtyByBatch, recentSoldQtyByBatch]);
 
   const [query, setQuery] = useState('');
   const [cart, setCart] = useState([]);
@@ -207,8 +213,45 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
       );
       await flushAll(db);
       const remaining = await db.getAll('SELECT status, last_error FROM pending_sales WHERE id = ?', [localId]);
+      const queueRow = remaining[0] || null;
 
-      setLastReceipt({ items: cart, total, paymentMethod, time: new Date(), queueRow: remaining[0] || null });
+      if (!queueRow) {
+        const soldByBatch = items.reduce((acc, item) => {
+          const cartLine = cart.find((line) => line.batch.id === item.batch_id);
+          const existing = acc[item.batch_id] || { quantity: 0, originalQuantity: Number(cartLine?.batch?.quantity_remaining || 0) };
+          existing.quantity += Number(item.quantity || 0);
+          acc[item.batch_id] = existing;
+          return acc;
+        }, {});
+        setRecentSoldQtyByBatch((previous) => {
+          const next = { ...previous };
+          for (const [batchId, sale] of Object.entries(soldByBatch)) {
+            const previousSale = next[batchId];
+            next[batchId] = {
+              quantity: Number(previousSale?.quantity || 0) + Number(sale.quantity || 0),
+              originalQuantity: previousSale?.originalQuantity ?? sale.originalQuantity,
+            };
+          }
+          return next;
+        });
+        window.setTimeout(() => {
+          setRecentSoldQtyByBatch((previous) => {
+            const next = { ...previous };
+            for (const [batchId, sale] of Object.entries(soldByBatch)) {
+              const previousSale = next[batchId];
+              const remainingQuantity = Number(previousSale?.quantity || 0) - Number(sale.quantity || 0);
+              if (remainingQuantity > 0) next[batchId] = { ...previousSale, quantity: remainingQuantity };
+              else delete next[batchId];
+            }
+            return next;
+          });
+        }, 15000);
+        window.dispatchEvent(new CustomEvent('pharmacy-pos:data-changed', {
+          detail: { type: 'sale', shopId: effectiveShopId },
+        }));
+      }
+
+      setLastReceipt({ items: cart, total, paymentMethod, time: new Date(), queueRow });
       setCart([]);
       setPrescriptionReference('');
       setPrescriberName('');
@@ -391,3 +434,5 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
     </div>
   );
 }
+
+

@@ -54,7 +54,7 @@ async function attachSupplierNames(batches) {
   }
 }
 
-export default function StockedDrugs({ activeShopId, organizationShops = [], onActiveShopChange }) {
+export default function StockedDrugs({ activeShopId, organizationShops = [], onActiveShopChange, dataVersion = 0 }) {
   const [staff, setStaff] = useState(null);
   const [allShops, setAllShops] = useState([]);
   const [selectedShopId, setSelectedShopId] = useState(null);
@@ -76,6 +76,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
   const [writeOffBatchId, setWriteOffBatchId] = useState('');
   const [writeOffReason, setWriteOffReason] = useState('');
   const [savingWriteOff, setSavingWriteOff] = useState(false);
+  const [expandedBatchDrugId, setExpandedBatchDrugId] = useState(null);
 
   const selectedShop = allShops.find((shop) => shop.id === selectedShopId);
   const destinationShops = useMemo(
@@ -210,7 +211,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
 
     loadStock();
     return () => { cancelled = true; };
-  }, [selectedShopId]);
+  }, [selectedShopId, dataVersion]);
 
   function openClassificationEditor(item) {
     setEditingDrug(item);
@@ -458,57 +459,73 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
             </thead>
             <tbody>
               {stockRows.map((item) => (
-                <tr key={item.drug_id}>
-                  <td>
-                    <strong>{item.name}</strong>
-                    {item.generic_name ? <div className="muted small">{item.generic_name}</div> : null}
-                    <div className="batch-stack">
-                      {item.batches.map((batch) => (
-                        <div key={batch.id} className={isExpiredBatch(batch) ? 'batch-chip expired' : 'batch-chip'}>
-                          <span>Batch {batch.batch_number || 'N/A'}</span>
-                          <span>{batch.supplier_name || 'Supplier not recorded'}</span>
-                          <span>Exp {batch.expiry_date}</span>
-                          <span>{Number(batch.quantity_remaining || 0)} units</span>
-                          <strong>{formatCurrency(batch.selling_price)}</strong>
+                <>
+                  <tr key={item.drug_id}>
+                    <td>
+                      <strong>{item.name}</strong>
+                      {item.generic_name ? <div className="muted small">{item.generic_name}</div> : null}
+                    </td>
+                    <td>{[item.strength, item.form].filter(Boolean).join(' / ') || '-'}</td>
+                    <td><span className={classificationClass(item.requires_prescription)}>{classificationLabel(item.requires_prescription)}</span></td>
+                    <td>
+                      <strong>{Number(item.available_units ?? item.units_in_stock ?? 0)}</strong>
+                      {item.expired_units > 0 ? <div className="muted small critical">Expired: {item.expired_units}</div> : null}
+                    </td>
+                    <td>
+                      {item.soonest_expiry ? new Date(item.soonest_expiry).toLocaleDateString('en-KE') : '-'}
+                      {item.expired_units > 0 ? <div className="muted small critical">Expired stock present</div> : null}
+                    </td>
+                    <td>{priceSummary(item.batches)}</td>
+                    <td>
+                      <div className="table-actions">
+                        <button
+                          type="button"
+                          className="table-action"
+                          onClick={() => setExpandedBatchDrugId((current) => current === item.drug_id ? null : item.drug_id)}
+                          disabled={item.batches.length === 0}
+                        >
+                          {expandedBatchDrugId === item.drug_id ? 'Hide batches' : 'Show batches'}
+                        </button>
+                        <button type="button" className="table-action" onClick={() => openClassificationEditor(item)}>
+                          Edit classification
+                        </button>
+                        <button
+                          type="button"
+                          className="table-action"
+                          onClick={() => openTransferDialog(item)}
+                          disabled={!staff?.isAdmin || item.batches.filter((batch) => !isExpiredBatch(batch)).length === 0 || destinationShops.length === 0}
+                        >
+                          Transfer
+                        </button>
+                        <button
+                          type="button"
+                          className="table-action danger"
+                          onClick={() => openWriteOffDialog(item)}
+                          disabled={!staff?.isAdmin || Number(item.expired_units || 0) <= 0}
+                        >
+                          Write off expired
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {expandedBatchDrugId === item.drug_id ? (
+                    <tr className="batch-detail-row">
+                      <td colSpan="7">
+                        <div className="batch-stack">
+                          {item.batches.map((batch) => (
+                            <div key={batch.id} className={isExpiredBatch(batch) ? 'batch-chip expired' : 'batch-chip'}>
+                              <span>Batch {batch.batch_number || 'N/A'}</span>
+                              <span>{batch.supplier_name || 'Supplier not recorded'}</span>
+                              <span>Exp {batch.expiry_date}</span>
+                              <span>{Number(batch.quantity_remaining || 0)} units</span>
+                              <strong>{formatCurrency(batch.selling_price)}</strong>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  </td>
-                  <td>{[item.strength, item.form].filter(Boolean).join(' / ') || '-'}</td>
-                  <td><span className={classificationClass(item.requires_prescription)}>{classificationLabel(item.requires_prescription)}</span></td>
-                  <td>
-                    <strong>{Number(item.available_units ?? item.units_in_stock ?? 0)}</strong>
-                    {item.expired_units > 0 ? <div className="muted small critical">Expired: {item.expired_units}</div> : null}
-                  </td>
-                  <td>
-                    {item.soonest_expiry ? new Date(item.soonest_expiry).toLocaleDateString('en-KE') : '-'}
-                    {item.expired_units > 0 ? <div className="muted small critical">Expired stock present</div> : null}
-                  </td>
-                  <td>{priceSummary(item.batches)}</td>
-                  <td>
-                    <div className="table-actions">
-                      <button type="button" className="table-action" onClick={() => openClassificationEditor(item)}>
-                        Edit classification
-                      </button>
-                      <button
-                        type="button"
-                        className="table-action"
-                        onClick={() => openTransferDialog(item)}
-                        disabled={!staff?.isAdmin || item.batches.filter((batch) => !isExpiredBatch(batch)).length === 0 || destinationShops.length === 0}
-                      >
-                        Transfer
-                      </button>
-                      <button
-                        type="button"
-                        className="table-action danger"
-                        onClick={() => openWriteOffDialog(item)}
-                        disabled={!staff?.isAdmin || Number(item.expired_units || 0) <= 0}
-                      >
-                        Write off expired
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+                      </td>
+                    </tr>
+                  ) : null}
+                </>
               ))}
             </tbody>
           </table>
@@ -657,5 +674,6 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
     </div>
   );
 }
+
 
 

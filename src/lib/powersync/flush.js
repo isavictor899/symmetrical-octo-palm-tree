@@ -19,6 +19,32 @@ function isAdminRole(value) {
   return ['admin', 'administrator', 'super_admin', 'superadmin', 'owner', 'shop_admin', 'shop-admin'].includes(role);
 }
 
+
+async function requestFreshDownload(db, uploadedCount) {
+  if (!uploadedCount) return;
+  if (typeof db.requestCheckpoint !== 'function') return;
+
+  try {
+    const checkpoint = await db.requestCheckpoint();
+    if (typeof checkpoint?.waitForSync !== 'function') return;
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      controller.abort(new Error('PowerSync checkpoint wait timed out'));
+    }, 8000);
+
+    try {
+      await checkpoint.waitForSync({ signal: controller.signal });
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  } catch (error) {
+    // A checkpoint is a freshness optimization. If it is unavailable, keep the
+    // existing background sync behaviour instead of failing the sale/receipt.
+    console.warn('[PowerSync] Fresh download request skipped:', errorMessage(error));
+  }
+}
+
 async function flushTable(db, table, rpcName, mapArgs) {
   const rows = await db.getAll(
     `SELECT * FROM ${table} WHERE status IS NULL OR status = 'pending' ORDER BY created_at`
@@ -133,7 +159,7 @@ async function flushAllOnce(db) {
   const { data: { session }, error } = await supabase.auth.getSession();
   if (error || !session) return;
 
-  await flushTable(db, 'pending_sales', 'sell_stock', (row) => ({
+  const uploadedSales = await flushTable(db, 'pending_sales', 'sell_stock', (row) => ({
     p_shop_id: row.shop_id,
     p_payment_method: row.payment_method,
     p_items: JSON.parse(row.items_json),
@@ -143,7 +169,7 @@ async function flushAllOnce(db) {
     p_prescription_date: row.prescription_date || null,
   }));
 
-  await flushTable(db, 'pending_receipts', 'receive_stock', (row) => ({
+  const uploadedReceipts = await flushTable(db, 'pending_receipts', 'receive_stock', (row) => ({
     p_shop_id: row.shop_id,
     p_drug_id: row.drug_id,
     p_supplier_id: row.supplier_id || null,
@@ -160,6 +186,15 @@ async function flushAllOnce(db) {
       ? null
       : Number(row.initial_requires_prescription) === 1,
   }));
+
+  const uploadedCount = uploadedSales + uploadedReceipts;
+  await requestFreshDownload(db, uploadedCount);
+
+  if (uploadedCount > 0 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('pharmacy-pos:data-changed', {
+      detail: { uploadedSales, uploadedReceipts },
+    }));
+  }
 }
 
 export function flushAll(db) {
@@ -175,4 +210,5 @@ export function flushAll(db) {
 
 export const flushPendingSales = flushAll;
 export const flushPendingReceipts = flushAll;
+
 
