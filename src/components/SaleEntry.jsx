@@ -21,7 +21,7 @@ function pickFefoBatch(drug) {
 
 export default function SaleEntry({ activeShopId, activeShopName }) {
   const db = usePowerSync();
-  const syncStatus = useStatus(); // { connected, ... } â€” lets us show online/offline
+  const syncStatus = useStatus(); // { connected, ... } ” lets us show online/offline
 
   // Local-first staff lookup, shared with ReceiveStock. keepTrying: keep
   // fetching from the server in the background until the row arrives.
@@ -112,6 +112,8 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
   }, [batchRows, pendingQtyByBatch, recentSoldQtyByBatch]);
 
   const [query, setQuery] = useState('');
+  const [remoteResults, setRemoteResults] = useState([]);
+  const [remoteSearchLoading, setRemoteSearchLoading] = useState(false);
   const [cart, setCart] = useState([]);
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [prescriptionReference, setPrescriptionReference] = useState('');
@@ -134,6 +136,86 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
         .sort((a, b) => new Date(a.batch.expiry_date) - new Date(b.batch.expiry_date))
       );
   }, [query, drugs]);
+
+  useEffect(() => {
+    const term = query.trim();
+    if (!term || !effectiveShopId || results.length > 0 || !syncStatus.connected) {
+      setRemoteResults([]);
+      setRemoteSearchLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        setRemoteSearchLoading(true);
+        const like = `%${term}%`;
+        const { data: matchingDrugs, error: drugsError } = await supabase
+          .from('drugs')
+          .select('id, name, generic_name')
+          .or(`name.ilike.${like},generic_name.ilike.${like}`)
+          .limit(50);
+        if (drugsError) throw drugsError;
+
+        const drugIds = (matchingDrugs || []).map((drug) => drug.id);
+        if (!drugIds.length) {
+          if (!cancelled) setRemoteResults([]);
+          return;
+        }
+
+        const [batchesResult, shopDrugsResult] = await Promise.all([
+          supabase.from('batches')
+            .select('id, drug_id, batch_number, expiry_date, selling_price, quantity_remaining')
+            .eq('shop_id', effectiveShopId)
+            .gt('quantity_remaining', 0)
+            .in('drug_id', drugIds)
+            .order('expiry_date', { ascending: true }),
+          supabase.from('shop_drugs')
+            .select('drug_id, requires_prescription')
+            .eq('shop_id', effectiveShopId)
+            .in('drug_id', drugIds),
+        ]);
+        if (batchesResult.error) throw batchesResult.error;
+        if (shopDrugsResult.error) throw shopDrugsResult.error;
+
+        const drugsById = Object.fromEntries((matchingDrugs || []).map((drug) => [drug.id, drug]));
+        const classificationByDrug = Object.fromEntries((shopDrugsResult.data || []).map((row) => [row.drug_id, row.requires_prescription]));
+        const today = new Date().toISOString().slice(0, 10);
+        const remoteRows = (batchesResult.data || []).map((batch) => {
+          const matchedDrug = drugsById[batch.drug_id] || {};
+          const requiresPrescription = classificationByDrug[batch.drug_id];
+          const pendingQty = pendingQtyByBatch[batch.id] || 0;
+          const available = Number(batch.quantity_remaining || 0) - pendingQty;
+          return {
+            drug: {
+              id: batch.drug_id,
+              name: matchedDrug.name || 'Unknown drug',
+              generic_name: matchedDrug.generic_name || '',
+              requiresPrescription: requiresPrescription === null || requiresPrescription === undefined
+                ? null
+                : Number(requiresPrescription) === 1,
+            },
+            batch: { ...batch, available },
+            expired: batch.expiry_date < today,
+          };
+        }).filter((row) => row.batch.available > 0 || row.expired);
+
+        if (!cancelled) setRemoteResults(remoteRows);
+      } catch (searchError) {
+        console.warn('[SaleEntry] Live search fallback failed:', searchError);
+        if (!cancelled) setRemoteResults([]);
+      } finally {
+        if (!cancelled) setRemoteSearchLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [query, effectiveShopId, results.length, syncStatus.connected, pendingQtyByBatch]);
+
+  const visibleResults = results.length ? results : remoteResults;
 
   function addToCart(drug, batch) {
     if (!batch || batch.available <= 0 || batch.expiry_date < new Date().toISOString().slice(0, 10)) return;
@@ -309,11 +391,15 @@ export default function SaleEntry({ activeShopId, activeShopName }) {
             placeholder="Search drug by name or genericâ€¦"
           />
 
-          {query.trim() && results.length === 0 && (
-            <div className="empty-state">No matches for "{query}".</div>
+          {query.trim() && results.length === 0 && remoteSearchLoading && (
+            <div className="empty-state">Searching stock while the local catalogue syncs…</div>
           )}
 
-          {results.map(({ drug, batch, expired }) => {
+          {query.trim() && visibleResults.length === 0 && !remoteSearchLoading && (
+            <div className="empty-state">No stocked batch matches "{query}" for this shop yet.</div>
+          )}
+
+          {visibleResults.map(({ drug, batch, expired }) => {
             const lowStock = !expired && batch.available <= 25;
             return (
               <button
