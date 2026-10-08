@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { PowerSyncContext } from '@powersync/react';
+import { Analytics } from '@vercel/analytics/react';
 import { supabase } from './lib/supabaseClient';
 import { db, connector } from './lib/powersync/database';
 import { flushAll } from './lib/powersync/flush';
@@ -236,6 +237,7 @@ export default function App() {
 
   return (
     <PowerSyncContext.Provider value={db}>
+      <Analytics />
       {authLoading ? (
         <div className="app-loading">Loading Pharmacy POS…</div>
       ) : !session ? (
@@ -284,5 +286,3 @@ export default function App() {
     </PowerSyncContext.Provider>
   );
 }
-
-
