@@ -144,6 +144,10 @@ export default function App() {
         // Role and shop lookups below run in the background; they no longer
         // hold the whole app behind two sequential network round trips.
         setAuthLoading(false);
+        // The session is known from local storage, so release the app shell now.
+        // Role and shop lookups below run in the background; they no longer
+        // hold the whole app behind two sequential network round trips.
+        setAuthLoading(false);
 
         // Start syncing while the staff/role lookup is in flight, rather than
         // making the page wait for those two network operations in sequence.
