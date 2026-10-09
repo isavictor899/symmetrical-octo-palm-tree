@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
-import { useQuery } from '@powersync/react';
+import { usePowerSync } from '@powersync/react';
 import { useRefreshGate } from '../lib/useRefreshGate';
 import { supabase } from '../lib/supabaseClient';
 import { canManageStockedDrugs, isAdminRole } from '../lib/roles';
@@ -56,7 +56,30 @@ async function attachSupplierNames(batches) {
   }
 }
 
+function buildPendingStockMaps(pendingSalesRows = [], pendingReceiptRows = []) {
+  const pendingSalesQtyByBatch = {};
+  for (const row of pendingSalesRows || []) {
+    try {
+      const items = JSON.parse(row.items_json || '[]');
+      for (const item of items) {
+        pendingSalesQtyByBatch[item.batch_id] = (pendingSalesQtyByBatch[item.batch_id] || 0) + Number(item.quantity || 0);
+      }
+    } catch {
+      // Ignore malformed queue rows; do not crash the stock page.
+    }
+  }
+
+  const pendingReceiptQtyByDrug = {};
+  for (const row of pendingReceiptRows || []) {
+    if (!row?.drug_id) continue;
+    pendingReceiptQtyByDrug[row.drug_id] = (pendingReceiptQtyByDrug[row.drug_id] || 0) + Number(row.quantity || 0);
+  }
+
+  return { pendingSalesQtyByBatch, pendingReceiptQtyByDrug };
+}
+
 export default function StockedDrugs({ activeShopId, organizationShops = [], onActiveShopChange, dataVersion = 0, isActive = true }) {
+  const db = usePowerSync();
   const gate = useRefreshGate(isActive, dataVersion);
   const showingShopRef = useRef(null);
   const [staff, setStaff] = useState(null);
@@ -91,23 +114,6 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
   const expiredWriteOffBatches = writeOffDrug?.batches?.filter(isExpiredBatch) || [];
   const selectedTransferBatch = transferableBatches.find((batch) => batch.id === transferBatchId);
   const selectedWriteOffBatch = expiredWriteOffBatches.find((batch) => batch.id === writeOffBatchId);
-  const { data: pendingSalesRows } = useQuery(
-    'SELECT id, items_json FROM pending_sales WHERE status IS NULL OR status = "pending"'
-  );
-  const pendingQtyByBatch = useMemo(() => {
-    const map = {};
-    for (const row of pendingSalesRows || []) {
-      try {
-        const items = JSON.parse(row.items_json || '[]');
-        for (const item of items) {
-          map[item.batch_id] = (map[item.batch_id] || 0) + Number(item.quantity || 0);
-        }
-      } catch {
-        // Ignore malformed queue rows; they should not break stock totals.
-      }
-    }
-    return map;
-  }, [pendingSalesRows]);
 
   useEffect(() => {
     let cancelled = false;
@@ -176,7 +182,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
         if (showingShopRef.current !== selectedShopId) setLoadingStock(true);
         setError('');
 
-        const [shopDrugsResult, batchesResult] = await Promise.all([
+        const [shopDrugsResult, batchesResult, pendingSalesRows, pendingReceiptRows] = await Promise.all([
           supabase.from('shop_drugs')
             .select('drug_id, requires_prescription, drugs(name, generic_name, form, strength)')
             .eq('shop_id', selectedShopId)
@@ -186,12 +192,15 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
             .eq('shop_id', selectedShopId)
             .gt('quantity_remaining', 0)
             .order('expiry_date', { ascending: true }),
+          db.getAll('SELECT id, items_json FROM pending_sales WHERE status IS NULL OR status = ?', ['pending']),
+          db.getAll('SELECT drug_id, quantity FROM pending_receipts WHERE status IS NULL OR status = ?', ['pending']),
         ]);
 
         if (shopDrugsResult.error) throw shopDrugsResult.error;
         if (batchesResult.error) throw batchesResult.error;
         showingShopRef.current = selectedShopId;
 
+        const { pendingSalesQtyByBatch, pendingReceiptQtyByDrug } = buildPendingStockMaps(pendingSalesRows, pendingReceiptRows);
         const batchesWithSuppliers = await attachSupplierNames(batchesResult.data || []);
 
         const batchesByDrug = {};
@@ -202,20 +211,22 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
 
         const rows = (shopDrugsResult.data || []).map((row) => {
           const batches = batchesByDrug[row.drug_id] || [];
-          const unitsInStock = batches.reduce((total, batch) => {
-            const reserved = Number(pendingQtyByBatch[batch.id] || 0);
+          const pendingReceiptAdjustment = Number(pendingReceiptQtyByDrug[row.drug_id] || 0);
+          const baseUnitsInStock = batches.reduce((total, batch) => {
+            const reserved = Number(pendingSalesQtyByBatch[batch.id] || 0);
             return total + Math.max(0, Number(batch.quantity_remaining || 0) - reserved);
           }, 0);
           const expiredBatches = batches.filter(isExpiredBatch);
           const availableBatches = batches.filter((batch) => !isExpiredBatch(batch));
           const expiredUnits = expiredBatches.reduce((total, batch) => {
-            const reserved = Number(pendingQtyByBatch[batch.id] || 0);
+            const reserved = Number(pendingSalesQtyByBatch[batch.id] || 0);
             return total + Math.max(0, Number(batch.quantity_remaining || 0) - reserved);
-          }, 0);
+          }, 0) + pendingReceiptAdjustment;
           const availableUnits = availableBatches.reduce((total, batch) => {
-            const reserved = Number(pendingQtyByBatch[batch.id] || 0);
+            const reserved = Number(pendingSalesQtyByBatch[batch.id] || 0);
             return total + Math.max(0, Number(batch.quantity_remaining || 0) - reserved);
-          }, 0);
+          }, 0) + pendingReceiptAdjustment;
+          const unitsInStock = baseUnitsInStock + pendingReceiptAdjustment;
           return {
             drug_id: row.drug_id,
             name: row.drugs?.name || 'Unknown drug',
@@ -346,6 +357,9 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
     if (refreshError) throw refreshError;
 
     const refreshedWithSuppliers = await attachSupplierNames(refreshedBatches || []);
+    const pendingSalesRows = await db.getAll('SELECT id, items_json FROM pending_sales WHERE status IS NULL OR status = ?', ['pending']);
+    const pendingReceiptRows = await db.getAll('SELECT drug_id, quantity FROM pending_receipts WHERE status IS NULL OR status = ?', ['pending']);
+    const { pendingSalesQtyByBatch, pendingReceiptQtyByDrug } = buildPendingStockMaps(pendingSalesRows, pendingReceiptRows);
 
     const batchesByDrug = {};
     for (const batch of refreshedWithSuppliers) {
@@ -355,23 +369,24 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
 
     setStockRows((previous) => previous.map((row) => {
       const batches = batchesByDrug[row.drug_id] || [];
+      const pendingReceiptAdjustment = Number(pendingReceiptQtyByDrug[row.drug_id] || 0);
       const expiredBatches = batches.filter(isExpiredBatch);
       const availableBatches = batches.filter((batch) => !isExpiredBatch(batch));
       return {
         ...row,
         batches,
         units_in_stock: batches.reduce((total, batch) => {
-          const reserved = Number(pendingQtyByBatch[batch.id] || 0);
+          const reserved = Number(pendingSalesQtyByBatch[batch.id] || 0);
           return total + Math.max(0, Number(batch.quantity_remaining || 0) - reserved);
-        }, 0),
+        }, 0) + pendingReceiptAdjustment,
         available_units: availableBatches.reduce((total, batch) => {
-          const reserved = Number(pendingQtyByBatch[batch.id] || 0);
+          const reserved = Number(pendingSalesQtyByBatch[batch.id] || 0);
           return total + Math.max(0, Number(batch.quantity_remaining || 0) - reserved);
-        }, 0),
+        }, 0) + pendingReceiptAdjustment,
         expired_units: expiredBatches.reduce((total, batch) => {
-          const reserved = Number(pendingQtyByBatch[batch.id] || 0);
+          const reserved = Number(pendingSalesQtyByBatch[batch.id] || 0);
           return total + Math.max(0, Number(batch.quantity_remaining || 0) - reserved);
-        }, 0),
+        }, 0) + pendingReceiptAdjustment,
         soonest_expiry: availableBatches[0]?.expiry_date || expiredBatches[0]?.expiry_date || null,
         latest_price: availableBatches.reduce((price, batch) => Number(batch.selling_price || 0) || price, 0),
       };
