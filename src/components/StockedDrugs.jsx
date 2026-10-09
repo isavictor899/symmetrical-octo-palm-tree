@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
+import { useQuery } from '@powersync/react';
 import { useRefreshGate } from '../lib/useRefreshGate';
 import { supabase } from '../lib/supabaseClient';
 import { canManageStockedDrugs, isAdminRole } from '../lib/roles';
@@ -90,6 +91,23 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
   const expiredWriteOffBatches = writeOffDrug?.batches?.filter(isExpiredBatch) || [];
   const selectedTransferBatch = transferableBatches.find((batch) => batch.id === transferBatchId);
   const selectedWriteOffBatch = expiredWriteOffBatches.find((batch) => batch.id === writeOffBatchId);
+  const { data: pendingSalesRows } = useQuery(
+    'SELECT id, items_json FROM pending_sales WHERE status IS NULL OR status = "pending"'
+  );
+  const pendingQtyByBatch = useMemo(() => {
+    const map = {};
+    for (const row of pendingSalesRows || []) {
+      try {
+        const items = JSON.parse(row.items_json || '[]');
+        for (const item of items) {
+          map[item.batch_id] = (map[item.batch_id] || 0) + Number(item.quantity || 0);
+        }
+      } catch {
+        // Ignore malformed queue rows; they should not break stock totals.
+      }
+    }
+    return map;
+  }, [pendingSalesRows]);
 
   useEffect(() => {
     let cancelled = false;
@@ -184,11 +202,20 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
 
         const rows = (shopDrugsResult.data || []).map((row) => {
           const batches = batchesByDrug[row.drug_id] || [];
-          const unitsInStock = batches.reduce((total, batch) => total + Number(batch.quantity_remaining || 0), 0);
+          const unitsInStock = batches.reduce((total, batch) => {
+            const reserved = Number(pendingQtyByBatch[batch.id] || 0);
+            return total + Math.max(0, Number(batch.quantity_remaining || 0) - reserved);
+          }, 0);
           const expiredBatches = batches.filter(isExpiredBatch);
           const availableBatches = batches.filter((batch) => !isExpiredBatch(batch));
-          const expiredUnits = expiredBatches.reduce((total, batch) => total + Number(batch.quantity_remaining || 0), 0);
-          const availableUnits = availableBatches.reduce((total, batch) => total + Number(batch.quantity_remaining || 0), 0);
+          const expiredUnits = expiredBatches.reduce((total, batch) => {
+            const reserved = Number(pendingQtyByBatch[batch.id] || 0);
+            return total + Math.max(0, Number(batch.quantity_remaining || 0) - reserved);
+          }, 0);
+          const availableUnits = availableBatches.reduce((total, batch) => {
+            const reserved = Number(pendingQtyByBatch[batch.id] || 0);
+            return total + Math.max(0, Number(batch.quantity_remaining || 0) - reserved);
+          }, 0);
           return {
             drug_id: row.drug_id,
             name: row.drugs?.name || 'Unknown drug',
@@ -333,9 +360,18 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
       return {
         ...row,
         batches,
-        units_in_stock: batches.reduce((total, batch) => total + Number(batch.quantity_remaining || 0), 0),
-        available_units: availableBatches.reduce((total, batch) => total + Number(batch.quantity_remaining || 0), 0),
-        expired_units: expiredBatches.reduce((total, batch) => total + Number(batch.quantity_remaining || 0), 0),
+        units_in_stock: batches.reduce((total, batch) => {
+          const reserved = Number(pendingQtyByBatch[batch.id] || 0);
+          return total + Math.max(0, Number(batch.quantity_remaining || 0) - reserved);
+        }, 0),
+        available_units: availableBatches.reduce((total, batch) => {
+          const reserved = Number(pendingQtyByBatch[batch.id] || 0);
+          return total + Math.max(0, Number(batch.quantity_remaining || 0) - reserved);
+        }, 0),
+        expired_units: expiredBatches.reduce((total, batch) => {
+          const reserved = Number(pendingQtyByBatch[batch.id] || 0);
+          return total + Math.max(0, Number(batch.quantity_remaining || 0) - reserved);
+        }, 0),
         soonest_expiry: availableBatches[0]?.expiry_date || expiredBatches[0]?.expiry_date || null,
         latest_price: availableBatches.reduce((price, batch) => Number(batch.selling_price || 0) || price, 0),
       };

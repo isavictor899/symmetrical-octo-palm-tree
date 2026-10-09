@@ -87,6 +87,17 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
     return map;
   }, [waitingSales]);
 
+  const reservedQtyByBatch = useMemo(() => {
+    const map = { ...pendingQtyByBatch };
+    for (const [batchId, sale] of Object.entries(recentSoldQtyByBatch)) {
+      const recentQty = Number(sale?.quantity || 0);
+      if (!recentQty) continue;
+      const pendingQty = Number(map[batchId] || 0);
+      map[batchId] = Math.max(pendingQty, recentQty);
+    }
+    return map;
+  }, [pendingQtyByBatch, recentSoldQtyByBatch]);
+
   const drugs = useMemo(() => {
     const byDrug = {};
     for (const b of batchRows || []) {
@@ -94,7 +105,12 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
       const recentSold = recentSale && Number(b.quantity_remaining || 0) >= Number(recentSale.originalQuantity || 0)
         ? Number(recentSale.quantity || 0)
         : 0;
-      const available = b.quantity_remaining - (pendingQtyByBatch[b.id] || 0) - recentSold;
+      const reservedQty = Math.max(
+        Number(pendingQtyByBatch[b.id] || 0),
+        Number(reservedQtyByBatch[b.id] || 0),
+        Number(recentSold || 0)
+      );
+      const available = Math.max(0, Number(b.quantity_remaining || 0) - reservedQty);
       if (!byDrug[b.drug_id]) {
         byDrug[b.drug_id] = {
           id: b.drug_id,
@@ -109,7 +125,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
       byDrug[b.drug_id].batches.push({ ...b, available });
     }
     return Object.values(byDrug);
-  }, [batchRows, pendingQtyByBatch, recentSoldQtyByBatch]);
+  }, [batchRows, pendingQtyByBatch, recentSoldQtyByBatch, reservedQtyByBatch]);
 
   const [query, setQuery] = useState('');
   const [remoteResults, setRemoteResults] = useState([]);
