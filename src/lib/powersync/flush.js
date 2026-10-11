@@ -19,6 +19,39 @@ function isAdminRole(value) {
   return ['admin', 'administrator', 'super_admin', 'superadmin', 'owner', 'shop_admin', 'shop-admin'].includes(role);
 }
 
+function normalizeSaleItems(itemsJson) {
+  let parsed = [];
+  try {
+    parsed = JSON.parse(itemsJson || '[]');
+  } catch (error) {
+    console.warn('[PowerSync] pending sale payload is not valid JSON:', errorMessage(error));
+    return { items: [], duplicates: [], totalQuantity: 0, byBatch: {} };
+  }
+
+  const items = Array.isArray(parsed) ? parsed : [];
+  const byBatch = {};
+  const duplicates = [];
+  let totalQuantity = 0;
+
+  for (const item of items) {
+    const batchId = item?.batch_id ?? item?.batchId;
+    const quantity = Number(item?.quantity || 0);
+    if (!batchId || !Number.isFinite(quantity) || quantity <= 0) continue;
+    totalQuantity += quantity;
+    if (!byBatch[batchId]) byBatch[batchId] = 0;
+    byBatch[batchId] += quantity;
+    if (byBatch[batchId] > quantity) {
+      duplicates.push(batchId);
+    }
+  }
+
+  return {
+    items,
+    duplicates: [...new Set(duplicates)],
+    totalQuantity,
+    byBatch,
+  };
+}
 
 async function requestFreshDownload(db, uploadedCount) {
   if (!uploadedCount) return;
@@ -126,8 +159,36 @@ async function flushTable(db, table, rpcName, mapArgs) {
     }
 
     try {
-      const { error } = await supabase.rpc(rpcName, mapArgs(row));
+      const finalizationArgs = mapArgs(row);
+      const saleSummary = table === 'pending_sales' ? normalizeSaleItems(row.items_json) : null;
+      if (saleSummary) {
+        const duplicateBatches = saleSummary.duplicates.length;
+        console.info('[PowerSync] finalizing sale payload', {
+          rowId: row.id,
+          shopId: row.shop_id,
+          totalAmount: Number(row.total_amount || 0),
+          totalQuantity: saleSummary.totalQuantity,
+          batchAllocations: saleSummary.byBatch,
+          duplicateBatchIds: saleSummary.duplicates,
+          duplicateBatchCount: duplicateBatches,
+        });
+        if (duplicateBatches > 0) {
+          console.warn('[PowerSync] duplicate batch allocation detected before sell_stock RPC', {
+            rowId: row.id,
+            duplicateBatchIds: saleSummary.duplicates,
+          });
+        }
+      }
+
+      const { error } = await supabase.rpc(rpcName, finalizationArgs);
       if (error) throw error;
+      if (saleSummary) {
+        console.info('[PowerSync] sale RPC succeeded', {
+          rowId: row.id,
+          totalQuantity: saleSummary.totalQuantity,
+          batchAllocations: saleSummary.byBatch,
+        });
+      }
       await db.execute(`DELETE FROM ${table} WHERE id = ?`, [row.id]);
       uploaded += 1;
     } catch (error) {
