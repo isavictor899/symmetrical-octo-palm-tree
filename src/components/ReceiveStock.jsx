@@ -31,11 +31,35 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [receiptType, setReceiptType] = useState('drug');
+  const [showNewMenu, setShowNewMenu] = useState(false);
+  const [newItemType, setNewItemType] = useState('');
+  const [newDrug, setNewDrug] = useState({ name: '', generic_name: '', category: '', form: '', strength: '', unit_of_sale: '' });
+  const [newEquipment, setNewEquipment] = useState({ name: '', category: '', unit: 'piece', description: '' });
+  const [equipmentSupplies, setEquipmentSupplies] = useState([]);
+  const [equipmentForm, setEquipmentForm] = useState({ equipmentSupplyId: '', supplierName: '', quantity: '', unitCost: '', note: '' });
   const effectiveShopId = activeShopId || staff?.shopId || null;
+
+  async function loadEquipmentSupplies() {
+    const { data: catalog, error: catalogError } = await supabase
+      .from('equipment_supplies').select('id, name, category, unit, description').order('name');
+    if (catalogError) throw catalogError;
+    const { data: stock, error: stockError } = await supabase
+      .from('shop_equipment_stock').select('equipment_supply_id, quantity_on_hand, average_cost').eq('shop_id', effectiveShopId);
+    if (stockError) throw stockError;
+    const stockById = Object.fromEntries((stock || []).map((row) => [row.equipment_supply_id, row]));
+    setEquipmentSupplies((catalog || []).map((item) => ({ ...item, ...(stockById[item.id] || {}) })));
+  }
+
+  useEffect(() => {
+    if (!effectiveShopId || !isActive) return;
+    loadEquipmentSupplies().catch((loadError) => setError(loadError.message || 'Could not load equipment supplies.'));
+  }, [effectiveShopId, isActive]);
 
   useEffect(() => {
     setForm(initialForm);
     setSelectedDrug(null);
+    setEquipmentForm((current) => ({ ...current, equipmentSupplyId: '' }));
     setError('');
     setMessage('');
   }, [effectiveShopId]);
@@ -122,6 +146,10 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
   async function submit(event) {
     event.preventDefault();
     if (!staff || !effectiveShopId || saving) return;
+    if (receiptType === 'equipment') {
+      await submitEquipment();
+      return;
+    }
     if (!form.drugId) {
       setError('Choose a drug before receiving stock.');
       return;
@@ -180,6 +208,85 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
     }
   }
 
+  async function createDrug(event) {
+    event.preventDefault();
+    setSaving(true); setError(''); setMessage('');
+    try {
+      const { data, error: insertError } = await supabase.from('drugs').insert({
+        name: newDrug.name.trim(),
+        generic_name: newDrug.generic_name.trim() || null,
+        category: newDrug.category.trim() || null,
+        form: newDrug.form.trim() || null,
+        strength: newDrug.strength.trim() || null,
+        unit_of_sale: newDrug.unit_of_sale.trim() || null,
+      }).select('id, name, generic_name').single();
+      if (insertError) throw insertError;
+      chooseDrug(data);
+      setReceiptType('drug');
+      setSearchFullCatalog(true);
+      setNewItemType('');
+      setNewDrug({ name: '', generic_name: '', category: '', form: '', strength: '', unit_of_sale: '' });
+      setMessage(`${data.name} was added to the drug catalog. Complete the receipt details below.`);
+    } catch (createError) {
+      setError(createError.message || 'Could not add the drug to the catalog.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createEquipment(event) {
+    event.preventDefault();
+    setSaving(true); setError(''); setMessage('');
+    try {
+      const { data, error: createError } = await supabase.rpc('create_equipment_supply', {
+        p_name: newEquipment.name.trim(),
+        p_category: newEquipment.category.trim(),
+        p_unit: newEquipment.unit,
+        p_description: newEquipment.description.trim() || null,
+      });
+      if (createError) throw createError;
+      const item = Array.isArray(data) ? data[0] : data;
+      await loadEquipmentSupplies();
+      setEquipmentForm((current) => ({ ...current, equipmentSupplyId: item.id }));
+      setReceiptType('equipment');
+      setNewItemType('');
+      setNewEquipment({ name: '', category: '', unit: 'piece', description: '' });
+      setMessage(`${item.name} was added to the equipment catalog. Complete the receipt details below.`);
+    } catch (createError) {
+      setError(createError.message || 'Could not add the equipment supply. Apply the equipment database migration and try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitEquipment(event) {
+    if (event) event.preventDefault();
+    if (!staff || !effectiveShopId || saving) return;
+    if (!navigator.onLine) {
+      setError('Receiving medical equipment requires an internet connection. Reconnect and try again.');
+      return;
+    }
+    setSaving(true); setError(''); setMessage('');
+    try {
+      const { error: receiptError } = await supabase.rpc('receive_equipment_supply', {
+        p_shop_id: effectiveShopId,
+        p_equipment_supply_id: equipmentForm.equipmentSupplyId,
+        p_quantity: Number(equipmentForm.quantity),
+        p_unit_cost: Number(equipmentForm.unitCost),
+        p_supplier_name: equipmentForm.supplierName.trim() || null,
+        p_note: equipmentForm.note.trim() || null,
+      });
+      if (receiptError) throw receiptError;
+      setMessage('Medical equipment stock received successfully.');
+      setEquipmentForm((current) => ({ ...current, quantity: '', unitCost: '', note: '' }));
+      await loadEquipmentSupplies();
+    } catch (receiptError) {
+      setError(receiptError.message || 'Could not receive medical equipment stock.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (staffError) return <main className="receive-stock"><p className="error">{staffError}</p></main>;
   if (!staff) return <main className="receive-stock"><p>Loading receiving form…</p></main>;
 
@@ -194,7 +301,16 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
         {pendingCount > 0 && <span className="status-warning"> · {pendingCount} receipt{pendingCount === 1 ? '' : 's'} waiting to sync</span>}
         {failedReceipts.length > 0 && <span className="status-critical"> · {failedReceipts.length} need attention</span>}
       </p>
-      <h1>Receive stock</h1>
+      <div className="receive-heading">
+        <h1>Receive stock</h1>
+        <div className="new-item-menu-wrap">
+          <button type="button" className="new-item-button" onClick={() => setShowNewMenu((visible) => !visible)}>＋ New</button>
+          {showNewMenu && <div className="new-item-menu" role="menu">
+            <button type="button" role="menuitem" onClick={() => { setNewItemType('drug'); setShowNewMenu(false); }}>＋ New drug</button>
+            <button type="button" role="menuitem" onClick={() => { setNewItemType('equipment'); setShowNewMenu(false); }}>＋ Medical equipment</button>
+          </div>}
+        </div>
+      </div>
       {activeShopName && <p className="muted">Receiving into {activeShopName}</p>}
     </header>
     {failedReceipts.length > 0 && <section aria-label="Receipts needing attention" className="notice danger">
@@ -204,7 +320,11 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
         <button type="button" onClick={async () => { await db.execute("UPDATE pending_receipts SET status = 'pending', last_error = NULL WHERE id = ?", [row.id]); flushAll(db); }}>Retry</button>
       </div>)}
     </section>}
-    <form onSubmit={submit}>
+    <div className="receipt-type-switch" role="group" aria-label="Stock type">
+      <button type="button" className={receiptType === 'drug' ? 'active' : ''} onClick={() => { setReceiptType('drug'); setError(''); setMessage(''); }}>Drugs</button>
+      <button type="button" className={receiptType === 'equipment' ? 'active' : ''} onClick={() => { setReceiptType('equipment'); setError(''); setMessage(''); }}>Medical equipment</button>
+    </div>
+    {receiptType === 'drug' ? <form onSubmit={submit}>
       <label className="drug-field">
         Drug
         {!searchFullCatalog && (
@@ -317,6 +437,42 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
       <label>Quantity received<input required min="1" step="1" type="number" value={form.quantity} onChange={(event) => update('quantity', event.target.value)} /></label>
       <button disabled={saving}>{saving ? 'Recording stock…' : 'Receive stock'}</button>
       {error && <p className="error">{error}</p>}{message && <p className="success">{message}</p>}
-    </form>
+    </form> : <form onSubmit={submitEquipment}>
+      <label className="drug-field">Medical equipment / supply
+        <select required value={equipmentForm.equipmentSupplyId} onChange={(event) => setEquipmentForm((current) => ({ ...current, equipmentSupplyId: event.target.value }))}>
+          <option value="">Select equipment or supply</option>
+          {equipmentSupplies.map((item) => <option value={item.id} key={item.id}>{item.name} — {item.category} ({item.unit}) · {Number(item.quantity_on_hand || 0)} on hand</option>)}
+        </select>
+        {equipmentSupplies.length === 0 && <small className="hint">No equipment supplies yet. Use New to add the first one.</small>}
+      </label>
+      <label>Supplier name<input value={equipmentForm.supplierName} onChange={(event) => setEquipmentForm((current) => ({ ...current, supplierName: event.target.value }))} placeholder="Optional" /></label>
+      <label>Quantity received<input required min="1" step="1" type="number" value={equipmentForm.quantity} onChange={(event) => setEquipmentForm((current) => ({ ...current, quantity: event.target.value }))} /></label>
+      <label>Unit cost (KES)<input required min="0" step="0.01" type="number" value={equipmentForm.unitCost} onChange={(event) => setEquipmentForm((current) => ({ ...current, unitCost: event.target.value }))} /></label>
+      <label className="drug-field">Note<input value={equipmentForm.note} onChange={(event) => setEquipmentForm((current) => ({ ...current, note: event.target.value }))} placeholder="Optional receipt details" /></label>
+      <button disabled={saving || !equipmentForm.equipmentSupplyId}>{saving ? 'Recording stock…' : 'Receive equipment stock'}</button>
+      {error && <p className="error">{error}</p>}{message && <p className="success">{message}</p>}
+    </form>}
+    {newItemType && <div className="new-item-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setNewItemType(''); }}>
+      <section className="new-item-dialog" role="dialog" aria-modal="true" aria-labelledby="new-item-title">
+        <button type="button" className="dialog-close" aria-label="Close" onClick={() => setNewItemType('')}>×</button>
+        <h2 id="new-item-title">Add {newItemType === 'drug' ? 'new drug' : 'medical equipment / supply'}</h2>
+        {newItemType === 'drug' ? <form onSubmit={createDrug}>
+          <label>Drug name<input required autoFocus value={newDrug.name} onChange={(event) => setNewDrug((current) => ({ ...current, name: event.target.value }))} /></label>
+          <label>Generic name<input value={newDrug.generic_name} onChange={(event) => setNewDrug((current) => ({ ...current, generic_name: event.target.value }))} /></label>
+          <label>Category<input value={newDrug.category} onChange={(event) => setNewDrug((current) => ({ ...current, category: event.target.value }))} placeholder="e.g. Antibiotic" /></label>
+          <label>Form<input value={newDrug.form} onChange={(event) => setNewDrug((current) => ({ ...current, form: event.target.value }))} placeholder="e.g. Tablet, syrup, cream" /></label>
+          <label>Strength<input value={newDrug.strength} onChange={(event) => setNewDrug((current) => ({ ...current, strength: event.target.value }))} placeholder="e.g. 500 mg" /></label>
+          <label>Unit of sale<input value={newDrug.unit_of_sale} onChange={(event) => setNewDrug((current) => ({ ...current, unit_of_sale: event.target.value }))} placeholder="e.g. tablet, bottle, pack" /></label>
+          <button disabled={saving}>{saving ? 'Adding drug…' : 'Add drug to catalog'}</button>
+        </form> : <form onSubmit={createEquipment}>
+          <label>Name<input required autoFocus value={newEquipment.name} onChange={(event) => setNewEquipment((current) => ({ ...current, name: event.target.value }))} placeholder="e.g. Examination gloves" /></label>
+          <label>Category<input required value={newEquipment.category} onChange={(event) => setNewEquipment((current) => ({ ...current, category: event.target.value }))} placeholder="e.g. Protective equipment" /></label>
+          <label>Unit<select value={newEquipment.unit} onChange={(event) => setNewEquipment((current) => ({ ...current, unit: event.target.value }))}><option>piece</option><option>box</option><option>pack</option><option>set</option><option>pair</option><option>roll</option><option>bottle</option></select></label>
+          <label>Description<input value={newEquipment.description} onChange={(event) => setNewEquipment((current) => ({ ...current, description: event.target.value }))} placeholder="Optional details" /></label>
+          <button disabled={saving}>{saving ? 'Adding supply…' : 'Add to equipment catalog'}</button>
+        </form>}
+        {error && <p className="error" role="alert">{error}</p>}
+      </section>
+    </div>}
   </main>;
 }
