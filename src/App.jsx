@@ -85,6 +85,7 @@ export default function App() {
   const { showUpdateToast, refreshApp } = usePwaUpdateToast();
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [recoveryMode, setRecoveryMode] = useState(false);
   const [page, setPage] = useState('sale');
   const [visitedPages, setVisitedPages] = useState(() => new Set(['sale']));
   const [staffRole, setStaffRole] = useState(null);
@@ -196,7 +197,9 @@ export default function App() {
       setAuthLoading(false);
     }
     supabase.auth.getSession().then(({ data }) => setSessionAndRole(data.session));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true);
+      if (event === 'SIGNED_OUT') setRecoveryMode(false);
       setSessionAndRole(nextSession);
     });
     return () => listener.subscription.unsubscribe();
@@ -251,6 +254,8 @@ export default function App() {
     <PowerSyncContext.Provider value={db}>
       {authLoading ? (
         <div className="app-loading">Loading Pharmacy POS…</div>
+      ) : recoveryMode ? (
+        <Login recoveryMode onRecoveryComplete={() => setRecoveryMode(false)} />
       ) : !session ? (
         <Login />
       ) : (

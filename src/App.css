@@ -233,9 +233,12 @@ textarea { resize: vertical; }
 .login-title { font-size: 22px; }
 .login-sub { margin-top: -8px; color: var(--text-muted); font-size: 13px; }
 .login-error { padding: 9px 11px; border-radius: var(--radius); color: var(--danger); background: var(--danger-bg); font-size: 13px; }
+.login-message { padding: 9px 11px; border-radius: var(--radius); color: var(--success, #176b45); background: var(--success-bg, #e9f7ef); font-size: 13px; }
 .login-submit { min-height: 42px; margin-top: 4px; border: 0; border-radius: var(--radius); color: var(--brand-primary-contrast); background: var(--brand-primary); font-size: 14px; font-weight: 800; cursor: pointer; }
 .login-submit:hover:not(:disabled) { background: var(--brand-primary-deep); }
 .login-submit:disabled { opacity: 0.6; cursor: default; }
+.login-link { justify-self: center; padding: 4px 8px; border: 0; color: var(--brand-primary); background: transparent; font: inherit; font-size: 13px; cursor: pointer; }
+.login-link:hover { text-decoration: underline; }
 
 /* ── Shared page chrome ──────────────────────────────────────── */
 .page-panel { max-width: 1180px; margin: 0 auto; padding: 28px 24px; }
