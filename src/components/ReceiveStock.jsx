@@ -37,21 +37,29 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
   const [newDrug, setNewDrug] = useState({ name: '', generic_name: '', category: '', form: '', strength: '', unit_of_sale: '' });
   const [newEquipment, setNewEquipment] = useState({ name: '', category: '', unit: 'piece', description: '' });
   const [equipmentSupplies, setEquipmentSupplies] = useState([]);
+  const [equipmentShopId, setEquipmentShopId] = useState(null);
   const [equipmentForm, setEquipmentForm] = useState({ equipmentSupplyId: '', supplierName: '', quantity: '', unitCost: '', sellingPrice: '', note: '' });
   const effectiveShopId = activeShopId || staff?.shopId || null;
+  const shopEquipmentSupplies = equipmentShopId === effectiveShopId ? equipmentSupplies : [];
 
   async function loadEquipmentSupplies() {
-    const { data: catalog, error: catalogError } = await supabase
-      .from('equipment_supplies').select('id, name, category, unit, description').order('name');
-    if (catalogError) throw catalogError;
     const { data: stock, error: stockError } = await supabase
-      .from('shop_equipment_stock').select('equipment_supply_id, quantity_on_hand, average_cost, selling_price').eq('shop_id', effectiveShopId);
+      .from('shop_equipment_stock')
+      .select('equipment_supply_id, quantity_on_hand, average_cost, selling_price, equipment_supplies(id, name, category, unit, description)')
+      .eq('shop_id', effectiveShopId)
+      .order('equipment_supply_id');
     if (stockError) throw stockError;
-    const stockById = Object.fromEntries((stock || []).map((row) => [row.equipment_supply_id, row]));
-    setEquipmentSupplies((catalog || []).map((item) => ({ ...item, ...(stockById[item.id] || {}) })));
+    setEquipmentSupplies((stock || []).map((row) => ({
+      ...row.equipment_supplies,
+      ...row,
+      id: row.equipment_supply_id,
+    })).filter((item) => item.name));
+    setEquipmentShopId(effectiveShopId);
   }
 
   useEffect(() => {
+    setEquipmentShopId(null);
+    setEquipmentSupplies([]);
     if (!effectiveShopId || !isActive) return;
     loadEquipmentSupplies().catch((loadError) => setError(loadError.message || 'Could not load equipment supplies.'));
   }, [effectiveShopId, isActive]);
@@ -246,7 +254,20 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
       });
       if (createError) throw createError;
       const item = Array.isArray(data) ? data[0] : data;
-      await loadEquipmentSupplies();
+      setEquipmentSupplies((current) => {
+        const createdForThisShop = {
+          id: item.id,
+          name: item.name,
+          category: item.category,
+          unit: item.unit,
+          description: item.description || '',
+          quantity_on_hand: 0,
+          average_cost: 0,
+          selling_price: 0,
+        };
+        return [createdForThisShop, ...current.filter((existing) => existing.id !== item.id)];
+      });
+      setEquipmentShopId(effectiveShopId);
       setEquipmentForm((current) => ({ ...current, equipmentSupplyId: item.id }));
       setReceiptType('equipment');
       setNewItemType('');
@@ -460,13 +481,13 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
     </form> : <form onSubmit={submitEquipment}>
       <label className="drug-field">Medical equipment / supply
         <select required value={equipmentForm.equipmentSupplyId} onChange={(event) => {
-          const selected = equipmentSupplies.find((item) => item.id === event.target.value);
+          const selected = shopEquipmentSupplies.find((item) => item.id === event.target.value);
           setEquipmentForm((current) => ({ ...current, equipmentSupplyId: event.target.value, sellingPrice: selected?.selling_price ? String(selected.selling_price) : current.sellingPrice }));
         }}>
           <option value="">Select equipment or supply</option>
-          {equipmentSupplies.map((item) => <option value={item.id} key={item.id}>{item.name} — {item.category} ({item.unit}) · {Number(item.quantity_on_hand || 0)} on hand</option>)}
+          {shopEquipmentSupplies.map((item) => <option value={item.id} key={item.id}>{item.name} — {item.category} ({item.unit}) · {Number(item.quantity_on_hand || 0)} on hand</option>)}
         </select>
-        {equipmentSupplies.length === 0 && <small className="hint">No equipment supplies yet. Use New to add the first one.</small>}
+        {shopEquipmentSupplies.length === 0 && <small className="hint">No equipment supplies stocked at this shop yet. Use New to add one for this shop.</small>}
       </label>
       <label>Supplier name<input value={equipmentForm.supplierName} onChange={(event) => setEquipmentForm((current) => ({ ...current, supplierName: event.target.value }))} placeholder="Optional" /></label>
       <label>Quantity received<input required min="1" step="1" type="number" value={equipmentForm.quantity} onChange={(event) => setEquipmentForm((current) => ({ ...current, quantity: event.target.value }))} /></label>
