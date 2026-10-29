@@ -220,7 +220,7 @@ async function flushAllOnce(db) {
   const { data: { session }, error } = await supabase.auth.getSession();
   if (error || !session) return;
 
-  const uploadedSales = await flushTable(db, 'pending_sales', 'sell_stock', (row) => ({
+  const uploadedSales = await flushTable(db, 'pending_sales', 'sell_stock_and_equipment', (row) => ({
     p_shop_id: row.shop_id,
     p_payment_method: row.payment_method,
     p_items: JSON.parse(row.items_json),

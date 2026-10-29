@@ -86,6 +86,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
   const [allShops, setAllShops] = useState([]);
   const [selectedShopId, setSelectedShopId] = useState(null);
   const [stockRows, setStockRows] = useState([]);
+  const [equipmentRows, setEquipmentRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingStock, setLoadingStock] = useState(false);
   const [error, setError] = useState('');
@@ -182,7 +183,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
         if (showingShopRef.current !== selectedShopId) setLoadingStock(true);
         setError('');
 
-        const [shopDrugsResult, batchesResult, pendingSalesRows, pendingReceiptRows] = await Promise.all([
+        const [shopDrugsResult, batchesResult, equipmentResult, pendingSalesRows, pendingReceiptRows] = await Promise.all([
           supabase.from('shop_drugs')
             .select('drug_id, requires_prescription, drugs(name, generic_name, form, strength)')
             .eq('shop_id', selectedShopId)
@@ -192,12 +193,17 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
             .eq('shop_id', selectedShopId)
             .gt('quantity_remaining', 0)
             .order('expiry_date', { ascending: true }),
+          supabase.from('shop_equipment_stock')
+            .select('equipment_supply_id, quantity_on_hand, average_cost, selling_price, equipment_supplies(name, category, unit)')
+            .eq('shop_id', selectedShopId)
+            .order('equipment_supply_id'),
           db.getAll('SELECT id, items_json FROM pending_sales WHERE status IS NULL OR status = ?', ['pending']),
           db.getAll('SELECT drug_id, quantity FROM pending_receipts WHERE status IS NULL OR status = ?', ['pending']),
         ]);
 
         if (shopDrugsResult.error) throw shopDrugsResult.error;
         if (batchesResult.error) throw batchesResult.error;
+        if (equipmentResult.error) throw equipmentResult.error;
         showingShopRef.current = selectedShopId;
 
         const { pendingSalesQtyByBatch, pendingReceiptQtyByDrug } = buildPendingStockMaps(pendingSalesRows, pendingReceiptRows);
@@ -243,7 +249,18 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
           };
         });
 
-        if (!cancelled) setStockRows(rows);
+        if (!cancelled) {
+          setStockRows(rows);
+          setEquipmentRows((equipmentResult.data || []).map((row) => ({
+            id: row.equipment_supply_id,
+            name: row.equipment_supplies?.name || 'Unknown equipment',
+            category: row.equipment_supplies?.category || '',
+            unit: row.equipment_supplies?.unit || 'unit',
+            quantity: Number(row.quantity_on_hand || 0),
+            average_cost: Number(row.average_cost || 0),
+            selling_price: Number(row.selling_price || 0),
+          })));
+        }
       } catch (stockError) {
         if (!cancelled) setError(stockError.message || 'Unable to load this shop stock.');
       } finally {
@@ -586,6 +603,29 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
           </table>
         </div>
       )}
+
+      <section className="equipment-stock-section" aria-labelledby="equipment-stock-title">
+        <h3 id="equipment-stock-title">Medical equipment and supplies</h3>
+        {!loadingStock && equipmentRows.length === 0 ? (
+          <p className="muted">No equipment stock has been recorded for this shop.</p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Equipment / supply</th><th>Category</th><th>On hand</th><th>Unit</th><th>Average cost</th><th>Selling price</th></tr></thead>
+              <tbody>{equipmentRows.map((item) => (
+                <tr key={item.id}>
+                  <td><strong>{item.name}</strong></td>
+                  <td>{item.category || '—'}</td>
+                  <td><strong>{item.quantity}</strong></td>
+                  <td>{item.unit}</td>
+                  <td>{formatCurrency(item.average_cost)}</td>
+                  <td>{formatCurrency(item.selling_price)}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       {editingDrug ? (
         <div className="modal-backdrop" role="presentation">

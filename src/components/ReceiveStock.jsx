@@ -37,7 +37,7 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
   const [newDrug, setNewDrug] = useState({ name: '', generic_name: '', category: '', form: '', strength: '', unit_of_sale: '' });
   const [newEquipment, setNewEquipment] = useState({ name: '', category: '', unit: 'piece', description: '' });
   const [equipmentSupplies, setEquipmentSupplies] = useState([]);
-  const [equipmentForm, setEquipmentForm] = useState({ equipmentSupplyId: '', supplierName: '', quantity: '', unitCost: '', note: '' });
+  const [equipmentForm, setEquipmentForm] = useState({ equipmentSupplyId: '', supplierName: '', quantity: '', unitCost: '', sellingPrice: '', note: '' });
   const effectiveShopId = activeShopId || staff?.shopId || null;
 
   async function loadEquipmentSupplies() {
@@ -45,7 +45,7 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
       .from('equipment_supplies').select('id, name, category, unit, description').order('name');
     if (catalogError) throw catalogError;
     const { data: stock, error: stockError } = await supabase
-      .from('shop_equipment_stock').select('equipment_supply_id, quantity_on_hand, average_cost').eq('shop_id', effectiveShopId);
+      .from('shop_equipment_stock').select('equipment_supply_id, quantity_on_hand, average_cost, selling_price').eq('shop_id', effectiveShopId);
     if (stockError) throw stockError;
     const stockById = Object.fromEntries((stock || []).map((row) => [row.equipment_supply_id, row]));
     setEquipmentSupplies((catalog || []).map((item) => ({ ...item, ...(stockById[item.id] || {}) })));
@@ -273,15 +273,35 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
         p_equipment_supply_id: equipmentForm.equipmentSupplyId,
         p_quantity: Number(equipmentForm.quantity),
         p_unit_cost: Number(equipmentForm.unitCost),
+        p_selling_price: Number(equipmentForm.sellingPrice),
         p_supplier_name: equipmentForm.supplierName.trim() || null,
         p_note: equipmentForm.note.trim() || null,
       });
       if (receiptError) throw receiptError;
       setMessage('Medical equipment stock received successfully.');
-      setEquipmentForm((current) => ({ ...current, quantity: '', unitCost: '', note: '' }));
+      setEquipmentForm((current) => ({ ...current, quantity: '', unitCost: '', sellingPrice: '', note: '' }));
       await loadEquipmentSupplies();
     } catch (receiptError) {
       setError(receiptError.message || 'Could not receive medical equipment stock.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveEquipmentPrice() {
+    if (!effectiveShopId || !equipmentForm.equipmentSupplyId || Number(equipmentForm.sellingPrice) <= 0 || saving) return;
+    setSaving(true); setError(''); setMessage('');
+    try {
+      const { error: priceError } = await supabase.rpc('set_equipment_supply_selling_price', {
+        p_shop_id: effectiveShopId,
+        p_equipment_supply_id: equipmentForm.equipmentSupplyId,
+        p_selling_price: Number(equipmentForm.sellingPrice),
+      });
+      if (priceError) throw priceError;
+      setMessage('Equipment selling price updated.');
+      await loadEquipmentSupplies();
+    } catch (priceError) {
+      setError(priceError.message || 'Could not update the equipment selling price.');
     } finally {
       setSaving(false);
     }
@@ -439,7 +459,10 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
       {error && <p className="error">{error}</p>}{message && <p className="success">{message}</p>}
     </form> : <form onSubmit={submitEquipment}>
       <label className="drug-field">Medical equipment / supply
-        <select required value={equipmentForm.equipmentSupplyId} onChange={(event) => setEquipmentForm((current) => ({ ...current, equipmentSupplyId: event.target.value }))}>
+        <select required value={equipmentForm.equipmentSupplyId} onChange={(event) => {
+          const selected = equipmentSupplies.find((item) => item.id === event.target.value);
+          setEquipmentForm((current) => ({ ...current, equipmentSupplyId: event.target.value, sellingPrice: selected?.selling_price ? String(selected.selling_price) : current.sellingPrice }));
+        }}>
           <option value="">Select equipment or supply</option>
           {equipmentSupplies.map((item) => <option value={item.id} key={item.id}>{item.name} — {item.category} ({item.unit}) · {Number(item.quantity_on_hand || 0)} on hand</option>)}
         </select>
@@ -448,6 +471,8 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
       <label>Supplier name<input value={equipmentForm.supplierName} onChange={(event) => setEquipmentForm((current) => ({ ...current, supplierName: event.target.value }))} placeholder="Optional" /></label>
       <label>Quantity received<input required min="1" step="1" type="number" value={equipmentForm.quantity} onChange={(event) => setEquipmentForm((current) => ({ ...current, quantity: event.target.value }))} /></label>
       <label>Unit cost (KES)<input required min="0" step="0.01" type="number" value={equipmentForm.unitCost} onChange={(event) => setEquipmentForm((current) => ({ ...current, unitCost: event.target.value }))} /></label>
+      <label>Selling price per unit (KES)<input required min="0.01" step="0.01" type="number" value={equipmentForm.sellingPrice} onChange={(event) => setEquipmentForm((current) => ({ ...current, sellingPrice: event.target.value }))} /></label>
+      <button type="button" className="button secondary" disabled={saving || !equipmentForm.equipmentSupplyId || Number(equipmentForm.sellingPrice) <= 0} onClick={saveEquipmentPrice}>Save price without receiving stock</button>
       <label className="drug-field">Note<input value={equipmentForm.note} onChange={(event) => setEquipmentForm((current) => ({ ...current, note: event.target.value }))} placeholder="Optional receipt details" /></label>
       <button disabled={saving || !equipmentForm.equipmentSupplyId}>{saving ? 'Recording stock…' : 'Receive equipment stock'}</button>
       {error && <p className="error">{error}</p>}{message && <p className="success">{message}</p>}

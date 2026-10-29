@@ -113,6 +113,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
   const [receivedStock, setReceivedStock] = useState([]);
   const [sourceShopNames, setSourceShopNames] = useState({});
   const [expiredStock, setExpiredStock] = useState([]);
+  const [equipmentStock, setEquipmentStock] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
@@ -218,7 +219,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
         // Phase 2: load less-critical / heavier datasets in the background.
         setLoadingMore(true);
         try {
-          const [itemsResult, batchesResult, policyResult, receivedResult] = await Promise.all([
+          const [itemsResult, batchesResult, policyResult, receivedResult, equipmentResult, equipmentSalesResult] = await Promise.all([
             supabase.from('sale_items').select('id, sale_id, drug_id, quantity, unit_price, drugs(name), sales!inner(id, shop_id, sold_at, total_amount, payment_method)')
               .eq('sales.shop_id', selectedShopId).gte('sales.sold_at', today),
             supabase.from('batches').select('id, drug_id, batch_number, expiry_date, quantity_remaining, drugs(name)')
@@ -229,10 +230,19 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
               .eq('shop_id', selectedShopId)
               .in('movement_type', ['received', 'transfer_in'])
               .gte('created_at', today).order('created_at', { ascending: false }),
+            supabase.from('shop_equipment_stock')
+              .select('equipment_supply_id, quantity_on_hand, average_cost, selling_price, equipment_supplies(name, category, unit)')
+              .eq('shop_id', selectedShopId)
+              .order('equipment_supply_id'),
+            supabase.from('equipment_sale_items')
+              .select('id, sale_id, equipment_supply_id, quantity, unit_price, equipment_supplies(name), sales!inner(id, shop_id, sold_at, total_amount, payment_method)')
+              .eq('sales.shop_id', selectedShopId).gte('sales.sold_at', today),
           ]);
           for (const result of [itemsResult, batchesResult, policyResult]) {
             if (result.error) throw result.error;
           }
+          if (equipmentResult.error) throw equipmentResult.error;
+          if (equipmentSalesResult.error) throw equipmentSalesResult.error;
 
           let receivedRows = receivedResult.data || [];
           let sourceNames = {};
@@ -292,6 +302,25 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
             }
           }
 
+          for (const item of equipmentSalesResult.data || []) {
+            const id = `equipment:${item.equipment_supply_id}`;
+            if (!byDrug[id]) byDrug[id] = { id, name: item.equipment_supplies?.name || 'Equipment', quantity: 0, revenue: 0 };
+            byDrug[id].quantity += Number(item.quantity || 0);
+            byDrug[id].revenue += Number(item.quantity || 0) * Number(item.unit_price || 0);
+            const sale = item.sales;
+            if (sale?.id) {
+              if (!transactionsBySale[sale.id]) transactionsBySale[sale.id] = {
+                id: sale.id, sold_at: sale.sold_at, payment_method: sale.payment_method,
+                total_amount: Number(sale.total_amount || 0), items: [],
+              };
+              transactionsBySale[sale.id].items.push({
+                id: item.id, name: item.equipment_supplies?.name || 'Equipment',
+                quantity: Number(item.quantity || 0),
+                amount: Number(item.quantity || 0) * Number(item.unit_price || 0),
+              });
+            }
+          }
+
           const stockByDrug = {};
           const expiredRows = [];
           // Start with every policy, including products that currently have no batches.
@@ -327,6 +356,15 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
             setReceivedStock(receivedRows);
             setSourceShopNames(sourceNames);
             setExpiredStock(expiredRows);
+            setEquipmentStock((equipmentResult.data || []).map((row) => ({
+              id: row.equipment_supply_id,
+              name: row.equipment_supplies?.name || 'Unknown equipment',
+              category: row.equipment_supplies?.category || '',
+              unit: row.equipment_supplies?.unit || 'unit',
+              quantity: Number(row.quantity_on_hand || 0),
+              averageCost: Number(row.average_cost || 0),
+              sellingPrice: Number(row.selling_price || 0),
+            })));
           }
         } catch (bgErr) {
           if (!cancelled) setError(bgErr.message || 'Unable to load some dashboard data.');
@@ -387,6 +425,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
       <article><span>Units received today</span><strong>{receivedUnits}</strong></article>
       <article><span>Expired units</span><strong className={expiredUnits > 0 ? 'critical' : ''}>{expiredUnits}</strong></article>
       <article><span>Low-stock drugs</span><strong>{lowStock.length}</strong></article>
+      <article><span>Equipment and supplies</span><strong>{equipmentStock.reduce((count, item) => count + (item.quantity > 0 ? 1 : 0), 0)}</strong></article>
     </section>
     <section className="panel recent-transactions">
       <div className="panel-title-row">
@@ -410,7 +449,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
       )}
     </section>
     <section className="dashboard-grid">
-      <article className="panel"><h2>Top-selling drugs</h2>
+      <article className="panel"><h2>Top-selling products</h2>
         {!topDrugs.length ? <p className="muted">No sales have been recorded today.</p> : <ol className="ranked-list">{topDrugs.map((drug) => <li key={drug.id}><span><strong>{drug.name}</strong><small>{drug.quantity} units sold</small></span><strong>{currency.format(drug.revenue)}</strong></li>)}</ol>}
       </article>
       <article className="panel"><h2>Stock at or below safety level</h2>
@@ -421,6 +460,9 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
       </article>
       <article className="panel"><h2>Stock received today</h2>
         {!receivedStock.length ? <p className="muted">No stock has been received today.</p> : <><div className="received-summary"><span><small>Units received</small><strong>{receivedUnits}</strong></span><span><small>Purchase value</small><strong>{currency.format(receivedCost)}</strong></span></div><ul className="stock-list">{receivedStock.map((movement) => <li key={movement.id}><span><strong>{movement.batches?.drugs?.name || 'Stock receipt'}</strong><small>{movementLabel(movement, sourceShopNames)} · {new Date(movement.created_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}</small></span><strong>{movement.quantity} units</strong></li>)}</ul></>}
+      </article>
+      <article className="panel"><h2>Medical equipment and supplies</h2>
+        {!equipmentStock.length ? <p className="muted">No equipment stock has been recorded for this shop.</p> : <ul className="stock-list">{equipmentStock.map((item) => <li key={item.id}><span><strong>{item.name}</strong><small>{item.category || item.unit} · Average cost {currency.format(item.averageCost)} · Selling price {currency.format(item.sellingPrice)}</small></span><strong>{item.quantity} {item.unit}</strong></li>)}</ul>}
       </article>
       <article className="panel"><h2>Expired stock requiring write-off</h2>
         {!expiredStock.length ? <p className="muted">No expired stock is currently on hand.</p> : <ul className="stock-list">{expiredStock.slice(0, 8).map((batch) => <li key={batch.id}><span><strong>{batch.drugs?.name || 'Expired drug'}</strong><small>Batch {batch.batch_number || 'No batch'} · Expired {new Date(batch.expiry_date).toLocaleDateString('en-KE')}</small></span><strong className="critical">{batch.quantity_remaining} units</strong></li>)}</ul>}

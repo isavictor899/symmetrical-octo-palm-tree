@@ -89,8 +89,10 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
   const [shops, setShops] = useState(organizationShops);
   const [sales, setSales] = useState([]);
   const [saleItems, setSaleItems] = useState([]);
+  const [equipmentSaleItems, setEquipmentSaleItems] = useState([]);
   const [movements, setMovements] = useState([]);
   const [currentInventory, setCurrentInventory] = useState([]);
+  const [equipmentInventory, setEquipmentInventory] = useState([]);
   const [sourceShopNames, setSourceShopNames] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -137,7 +139,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
 
         const { startIso, endIso } = monthRange(month);
 
-        const [salesResult, saleItemsResult, movementResult, inventoryResult] = await Promise.all([
+        const [salesResult, saleItemsResult, movementResult, inventoryResult, equipmentSalesResult, equipmentInventoryResult] = await Promise.all([
           supabase.from('sales')
             .select('id, shop_id, total_amount, payment_method, sold_at')
             .in('shop_id', shopIds)
@@ -158,12 +160,20 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
           supabase.from('batches')
             .select('shop_id, drug_id, quantity_remaining, selling_price, expiry_date, drugs(name, generic_name)')
             .in('shop_id', shopIds),
+          supabase.from('equipment_sale_items')
+            .select('equipment_supply_id, quantity, unit_price, equipment_supplies(name, unit), sales!inner(shop_id, sold_at)')
+            .in('sales.shop_id', shopIds).gte('sales.sold_at', startIso).lt('sales.sold_at', endIso),
+          supabase.from('shop_equipment_stock')
+            .select('shop_id, equipment_supply_id, quantity_on_hand, selling_price, equipment_supplies(name, unit)')
+            .in('shop_id', shopIds),
         ]);
 
         if (salesResult.error) throw salesResult.error;
         showingMonthRef.current = month;
         if (saleItemsResult.error) throw saleItemsResult.error;
         if (inventoryResult.error) throw inventoryResult.error;
+        if (equipmentSalesResult.error) throw equipmentSalesResult.error;
+        if (equipmentInventoryResult.error) throw equipmentInventoryResult.error;
 
         let movementRows = movementResult.data || [];
         let sourceNames = {};
@@ -196,8 +206,10 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
           setShops(reportShops);
           setSales(salesResult.data || []);
           setSaleItems(saleItemsResult.data || []);
+          setEquipmentSaleItems(equipmentSalesResult.data || []);
           setMovements(movementRows);
           setCurrentInventory(inventoryResult.data || []);
+          setEquipmentInventory(equipmentInventoryResult.data || []);
           setSourceShopNames(sourceNames);
         }
       } catch (loadError) {
@@ -226,6 +238,11 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
       if (!row) continue;
       row.unitsSold += Number(item.quantity || 0);
     }
+    for (const item of equipmentSaleItems) {
+      const row = shopMap.get(item.sales?.shop_id);
+      if (!row) continue;
+      row.unitsSold += Number(item.quantity || 0);
+    }
 
     for (const movement of movements) {
       const row = shopMap.get(movement.shop_id);
@@ -241,6 +258,22 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
       (item) => item.quantity,
       (item) => Number(item.quantity || 0) * Number(item.unit_price || 0)
     );
+    const soldEquipment = equipmentSaleItems.reduce((grouped, item) => {
+      const id = item.equipment_supply_id;
+      const row = grouped.get(id) || { id, name: item.equipment_supplies?.name || 'Equipment', generic: item.equipment_supplies?.unit || '', quantity: 0, amount: 0 };
+      row.quantity += Number(item.quantity || 0);
+      row.amount += Number(item.quantity || 0) * Number(item.unit_price || 0);
+      grouped.set(id, row);
+      return grouped;
+    }, new Map());
+    const currentEquipment = equipmentInventory.reduce((grouped, item) => {
+      const id = item.equipment_supply_id;
+      const row = grouped.get(id) || { id, name: item.equipment_supplies?.name || 'Equipment', generic: item.equipment_supplies?.unit || '', quantity: 0, amount: 0 };
+      row.quantity += Number(item.quantity_on_hand || 0);
+      row.amount += Number(item.quantity_on_hand || 0) * Number(item.selling_price || 0);
+      grouped.set(id, row);
+      return grouped;
+    }, new Map());
     const receivedDrugs = groupDrugs(
       movements.filter((row) => row.movement_type === 'received'),
       (row) => row.quantity,
@@ -268,18 +301,21 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
       shopRows: [...shopMap.values()],
       totalSales: sales.reduce((total, sale) => total + Number(sale.total_amount || 0), 0),
       transactions: sales.length,
-      unitsSold: saleItems.reduce((total, item) => total + Number(item.quantity || 0), 0),
+      unitsSold: saleItems.reduce((total, item) => total + Number(item.quantity || 0), 0)
+        + equipmentSaleItems.reduce((total, item) => total + Number(item.quantity || 0), 0),
       receivedUnits: movements.filter((row) => row.movement_type === 'received').reduce((total, row) => total + Number(row.quantity || 0), 0),
       transferredOutUnits: movements.filter((row) => row.movement_type === 'transfer_out').reduce((total, row) => total + Number(row.quantity || 0), 0),
       topSelling: topRows(soldDrugs),
       leastSelling: leastRows(soldDrugs),
+      soldEquipment: topRows([...soldEquipment.values()]),
+      currentEquipment: topRows([...currentEquipment.values()], 12),
       receivedDrugs: topRows(receivedDrugs, 10),
       transferOutDrugs: topRows(transferOutDrugs, 10),
       inventoryDrugs: topRows(inventoryDrugs, 12),
       paymentRows: Object.values(paymentSummary).sort((a, b) => b.amount - a.amount),
       transferRows: movements.filter((row) => row.movement_type === 'transfer_out' || row.movement_type === 'transfer_in'),
     };
-  }, [shops, sales, saleItems, movements, currentInventory]);
+  }, [shops, sales, saleItems, equipmentSaleItems, movements, currentInventory, equipmentInventory]);
 
   const { label } = monthRange(month);
 
@@ -333,8 +369,10 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
 
         <DrugPanel title="Top-selling drugs" rows={report.topSelling} empty="No sales were recorded this month." showAmount />
         <DrugPanel title="Least-selling drugs" rows={report.leastSelling} empty="No sold drugs to compare yet." showAmount />
+        <DrugPanel title="Medical equipment sold" rows={report.soldEquipment} empty="No equipment sales were recorded this month." showAmount />
         <DrugPanel title="Drugs bought / received" rows={report.receivedDrugs} empty="No supplier stock receipts this month." showAmount />
         <DrugPanel title="Current organization stock" rows={report.inventoryDrugs} empty="No current stock found." showAmount amountLabel="Stock value" />
+        <DrugPanel title="Current equipment stock" rows={report.currentEquipment} empty="No current equipment stock found." showAmount amountLabel="Stock value" />
 
         <article className="report-panel wide">
           <h2>Transfers between shops</h2>

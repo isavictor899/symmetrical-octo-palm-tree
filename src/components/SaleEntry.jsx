@@ -129,6 +129,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
 
   const [query, setQuery] = useState('');
   const [remoteResults, setRemoteResults] = useState([]);
+  const [equipmentStock, setEquipmentStock] = useState([]);
   const [remoteSearchLoading, setRemoteSearchLoading] = useState(false);
   const [cart, setCart] = useState([]);
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -236,6 +237,40 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
 
   const visibleResults = results.length ? results : remoteResults;
 
+  useEffect(() => {
+    if (!isActive || !effectiveShopId || !syncStatus.connected) {
+      setEquipmentStock([]);
+      return undefined;
+    }
+    let cancelled = false;
+    supabase.from('shop_equipment_stock')
+      .select('equipment_supply_id, quantity_on_hand, selling_price, equipment_supplies(name, category, unit)')
+      .eq('shop_id', effectiveShopId).gt('quantity_on_hand', 0)
+      .then(({ data, error }) => {
+        if (error) throw error;
+        if (!cancelled) setEquipmentStock((data || []).map((row) => ({
+          id: row.equipment_supply_id,
+          name: row.equipment_supplies?.name || 'Equipment',
+          category: row.equipment_supplies?.category || '',
+          unit: row.equipment_supplies?.unit || 'unit',
+          available: Number(row.quantity_on_hand || 0),
+          selling_price: Number(row.selling_price || 0),
+        })));
+      }).catch((searchError) => {
+        console.warn('[SaleEntry] Equipment stock search failed:', searchError);
+        if (!cancelled) setEquipmentStock([]);
+      });
+    return () => { cancelled = true; };
+  }, [effectiveShopId, syncStatus.connected, isActive]);
+
+  const equipmentResults = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return [];
+    return equipmentStock.filter((item) => `${item.name} ${item.category}`.toLowerCase().includes(term) && item.selling_price > 0);
+  }, [equipmentStock, query]);
+
+  const lineKey = (line) => line.kind === 'equipment' ? `equipment:${line.item.id}` : `drug:${line.batch.id}`;
+
   function addToCart(drug, batch) {
     if (!batch || batch.available <= 0 || batch.expiry_date < new Date().toISOString().slice(0, 10)) return;
     setCart((prev) => {
@@ -247,6 +282,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
         );
       }
       return [...prev, {
+        kind: 'drug',
         drugId: drug.id,
         drugName: drug.name,
         batch,
@@ -257,24 +293,38 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
     setQuery('');
   }
 
-  function updateQty(batchId, delta) {
+  function addEquipmentToCart(item) {
+    if (!syncStatus.connected || item.available <= 0 || item.selling_price <= 0) return;
+    setCart((prev) => {
+      const existing = prev.find((line) => line.kind === 'equipment' && line.item.id === item.id);
+      if (existing) {
+        if (existing.qty >= item.available) return prev;
+        return prev.map((line) => line.kind === 'equipment' && line.item.id === item.id ? { ...line, qty: line.qty + 1 } : line);
+      }
+      return [...prev, { kind: 'equipment', item, drugName: item.name, qty: 1, requiresPrescription: false }];
+    });
+    setQuery('');
+  }
+
+  function updateQty(key, delta) {
     setCart((prev) =>
       prev.map((line) =>
-        line.batch.id === batchId
-          ? { ...line, qty: Math.max(1, Math.min(line.qty + delta, line.batch.available)) }
+        lineKey(line) === key
+          ? { ...line, qty: Math.max(1, Math.min(line.qty + delta, line.kind === 'equipment' ? line.item.available : line.batch.available)) }
           : line
       )
     );
   }
 
-  function removeLine(batchId) {
-    setCart((prev) => prev.filter((line) => line.batch.id !== batchId));
+  function removeLine(key) {
+    setCart((prev) => prev.filter((line) => lineKey(line) !== key));
   }
 
-  const total = cart.reduce((sum, line) => sum + line.qty * line.batch.selling_price, 0);
+  const linePrice = (line) => line.kind === 'equipment' ? line.item.selling_price : line.batch.selling_price;
+  const total = cart.reduce((sum, line) => sum + line.qty * linePrice(line), 0);
 
   // Writes the sale into the LOCAL pending_sales queue — works offline.
-  // The connector picks it up and calls sell_stock automatically once
+  // The connector picks it up and calls sell_stock_and_equipment once
   // there's connectivity; nothing here calls Supabase directly.
   async function checkout() {
     if (cart.length === 0 || !staffInfo || !effectiveShopId) return;
@@ -294,10 +344,12 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
       if (sessionError || !session) throw new Error('Your sign-in session is unavailable. Sign in again before recording this sale.');
       const localId = crypto.randomUUID();
       const items = cart.map((line) => ({
-        drug_id: line.drugId,
-        batch_id: line.batch.id,
+        item_type: line.kind,
         quantity: line.qty,
-        unit_price: line.batch.selling_price,
+        unit_price: linePrice(line),
+        ...(line.kind === 'equipment'
+          ? { equipment_supply_id: line.item.id }
+          : { drug_id: line.drugId, batch_id: line.batch.id }),
       }));
 
       await db.execute(
@@ -318,7 +370,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
 
       if (!queueRow) {
         const soldByBatch = items.reduce((acc, item) => {
-          const cartLine = cart.find((line) => line.batch.id === item.batch_id);
+          const cartLine = cart.find((line) => line.kind === 'drug' && line.batch.id === item.batch_id);
           const existing = acc[item.batch_id] || { quantity: 0, originalQuantity: Number(cartLine?.batch?.quantity_remaining || 0) };
           existing.quantity += Number(item.quantity || 0);
           acc[item.batch_id] = existing;
@@ -407,15 +459,15 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search drug by name or generic name…"
+            placeholder="Search drugs or medical equipment…"
           />
 
-          {query.trim() && results.length === 0 && remoteSearchLoading && (
+          {query.trim() && results.length === 0 && equipmentResults.length === 0 && remoteSearchLoading && (
             <div className="empty-state">Searching stock while the local catalogue syncs…</div>
           )}
 
-          {query.trim() && visibleResults.length === 0 && !remoteSearchLoading && (
-            <div className="empty-state">No stocked batch matches "{query}" for this shop yet.</div>
+          {query.trim() && visibleResults.length === 0 && equipmentResults.length === 0 && !remoteSearchLoading && (
+            <div className="empty-state">No stocked drug batch or priced equipment matches "{query}" for this shop yet.</div>
           )}
 
           {visibleResults.map(({ drug, batch, expired }) => {
@@ -450,9 +502,19 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
             );
           })}
 
+          {equipmentResults.map((item) => (
+            <button key={`equipment-${item.id}`} onClick={() => addEquipmentToCart(item)} disabled={!syncStatus.connected || item.available <= 0} className="product-row">
+              <div>
+                <div className="product-title">{item.name}<span className="mini-badge">Equipment</span></div>
+                <div className="product-meta">{item.category || 'Medical equipment'} · {item.available} {item.unit} available</div>
+              </div>
+              <div className="product-price tnum">{formatKes(item.selling_price)}<small>Per {item.unit}</small></div>
+            </button>
+          ))}
+
           {!query.trim() && (
             <div className="empty-state">
-              Start typing to find a drug. Each batch and price appears separately so you can choose the exact stock line.
+              Start typing to find a drug or medical equipment. Drug batches and equipment prices appear as separate stock lines.
             </div>
           )}
         </section>
@@ -463,18 +525,20 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
           <div className="cart-list">
             {cart.length === 0 && <div className="empty-state">No items yet.</div>}
             {cart.map((line) => (
-              <div key={line.batch.id} className="cart-line">
+              <div key={lineKey(line)} className="cart-line">
                 <div>
                   <div className="cart-drug">{line.drugName}</div>
-                  <div className="cart-meta">Batch {line.batch.batch_number || 'N/A'} · exp {line.batch.expiry_date}</div>
-                  <div className="cart-meta">{formatKes(line.batch.selling_price)} each</div>
+                  {line.kind === 'equipment'
+                    ? <div className="cart-meta">Medical equipment · {line.item.unit}</div>
+                    : <div className="cart-meta">Batch {line.batch.batch_number || 'N/A'} · exp {line.batch.expiry_date}</div>}
+                  <div className="cart-meta">{formatKes(linePrice(line))} each</div>
                 </div>
                 <div className="cart-controls">
-                  <button type="button" onClick={() => updateQty(line.batch.id, -1)}>-</button>
+                  <button type="button" onClick={() => updateQty(lineKey(line), -1)}>-</button>
                   <span className="tnum">{line.qty}</span>
-                  <button type="button" onClick={() => updateQty(line.batch.id, 1)}>+</button>
-                  <strong className="tnum">{formatKes(line.qty * line.batch.selling_price)}</strong>
-                  <button type="button" className="remove-line" onClick={() => removeLine(line.batch.id)}>Remove</button>
+                  <button type="button" onClick={() => updateQty(lineKey(line), 1)}>+</button>
+                  <strong className="tnum">{formatKes(line.qty * linePrice(line))}</strong>
+                  <button type="button" className="remove-line" onClick={() => removeLine(lineKey(line))}>Remove</button>
                 </div>
               </div>
             ))}
