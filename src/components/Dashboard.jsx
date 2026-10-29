@@ -106,6 +106,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
   const [selectedShopId, setSelectedShopId] = useState(null);
   const [shopName, setShopName] = useState('');
   const [todaySales, setTodaySales] = useState([]);
+  const [todayReturns, setTodayReturns] = useState([]);
   const [recentTransactions, setRecentTransactions] = useState([]);
   const [topDrugs, setTopDrugs] = useState([]);
   const [lowStock, setLowStock] = useState([]);
@@ -208,6 +209,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
 
         if (!cancelled) {
           setTodaySales(salesResult.data || []);
+          setTodayReturns([]);
         }
 
         // Allow the UI to render and stop the initial loading state.
@@ -219,7 +221,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
         // Phase 2: load less-critical / heavier datasets in the background.
         setLoadingMore(true);
         try {
-          const [itemsResult, batchesResult, policyResult, receivedResult, equipmentResult, equipmentSalesResult] = await Promise.all([
+          const [itemsResult, batchesResult, policyResult, receivedResult, equipmentResult, equipmentSalesResult, returnsResult] = await Promise.all([
             supabase.from('sale_items').select('id, sale_id, drug_id, quantity, unit_price, drugs(name), sales!inner(id, shop_id, sold_at, total_amount, payment_method)')
               .eq('sales.shop_id', selectedShopId).gte('sales.sold_at', today),
             supabase.from('batches').select('id, drug_id, batch_number, expiry_date, quantity_remaining, drugs(name)')
@@ -237,12 +239,15 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
             supabase.from('equipment_sale_items')
               .select('id, sale_id, equipment_supply_id, quantity, unit_price, equipment_supplies(name), sales!inner(id, shop_id, sold_at, total_amount, payment_method)')
               .eq('sales.shop_id', selectedShopId).gte('sales.sold_at', today),
+            supabase.from('sales_returns').select('id, total_amount, refund_method, created_at')
+              .eq('shop_id', selectedShopId).gte('created_at', today),
           ]);
           for (const result of [itemsResult, batchesResult, policyResult]) {
             if (result.error) throw result.error;
           }
           if (equipmentResult.error) throw equipmentResult.error;
           if (equipmentSalesResult.error) throw equipmentSalesResult.error;
+          if (returnsResult.error) throw returnsResult.error;
 
           let receivedRows = receivedResult.data || [];
           let sourceNames = {};
@@ -365,6 +370,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
               averageCost: Number(row.average_cost || 0),
               sellingPrice: Number(row.selling_price || 0),
             })));
+            setTodayReturns(returnsResult.data || []);
           }
         } catch (bgErr) {
           if (!cancelled) setError(bgErr.message || 'Unable to load some dashboard data.');
@@ -381,13 +387,15 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
   }, [selectedShopId, gate]);
 
   const totalRevenue = useMemo(
-    () => todaySales.reduce((total, sale) => total + Number(sale.total_amount), 0),
-    [todaySales]
+    () => todaySales.reduce((total, sale) => total + Number(sale.total_amount), 0)
+      - todayReturns.reduce((total, row) => total + Number(row.total_amount || 0), 0),
+    [todaySales, todayReturns]
   );
   const paymentSummary = useMemo(() => paymentMethods.map((method) => {
     const sales = todaySales.filter((sale) => sale.payment_method === method);
-    return { method, count: sales.length, total: sales.reduce((sum, sale) => sum + Number(sale.total_amount), 0) };
-  }), [todaySales]);
+    const refunds = todayReturns.filter((row) => row.refund_method === method);
+    return { method, count: sales.length, total: sales.reduce((sum, sale) => sum + Number(sale.total_amount), 0) - refunds.reduce((sum, row) => sum + Number(row.total_amount || 0), 0) };
+  }), [todaySales, todayReturns]);
   const receivedUnits = useMemo(() => receivedStock.reduce((total, movement) => total + Number(movement.quantity), 0), [receivedStock]);
   const receivedCost = useMemo(() => receivedStock.reduce(
     (total, movement) => total + Number(movement.quantity) * Number(movement.batches?.cost_price || 0), 0
@@ -420,7 +428,8 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
     )}
     {loadingMore && <div className="loading-more">Loading additional dashboard data…</div>}
     <section className="metrics" aria-label="Today’s sales summary">
-      <article><span>Sales today</span><strong>{currency.format(totalRevenue)}</strong></article>
+      <article><span>Net sales today</span><strong>{currency.format(totalRevenue)}</strong></article>
+      <article><span>Returns today</span><strong>{currency.format(todayReturns.reduce((sum, row) => sum + Number(row.total_amount || 0), 0))}</strong></article>
       <article><span>Transactions</span><strong>{todaySales.length}</strong></article>
       <article><span>Units received today</span><strong>{receivedUnits}</strong></article>
       <article><span>Expired units</span><strong className={expiredUnits > 0 ? 'critical' : ''}>{expiredUnits}</strong></article>

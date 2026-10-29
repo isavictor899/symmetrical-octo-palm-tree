@@ -88,6 +88,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
   const [month, setMonth] = useState(currentMonthValue());
   const [shops, setShops] = useState(organizationShops);
   const [sales, setSales] = useState([]);
+  const [salesReturns, setSalesReturns] = useState([]);
   const [saleItems, setSaleItems] = useState([]);
   const [equipmentSaleItems, setEquipmentSaleItems] = useState([]);
   const [movements, setMovements] = useState([]);
@@ -139,7 +140,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
 
         const { startIso, endIso } = monthRange(month);
 
-        const [salesResult, saleItemsResult, movementResult, inventoryResult, equipmentSalesResult, equipmentInventoryResult] = await Promise.all([
+        const [salesResult, saleItemsResult, movementResult, inventoryResult, equipmentSalesResult, equipmentInventoryResult, returnsResult] = await Promise.all([
           supabase.from('sales')
             .select('id, shop_id, total_amount, payment_method, sold_at')
             .in('shop_id', shopIds)
@@ -166,6 +167,9 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
           supabase.from('shop_equipment_stock')
             .select('shop_id, equipment_supply_id, quantity_on_hand, selling_price, equipment_supplies(name, unit)')
             .in('shop_id', shopIds),
+          supabase.from('sales_returns')
+            .select('shop_id, refund_method, total_amount, created_at')
+            .in('shop_id', shopIds).gte('created_at', startIso).lt('created_at', endIso),
         ]);
 
         if (salesResult.error) throw salesResult.error;
@@ -174,6 +178,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
         if (inventoryResult.error) throw inventoryResult.error;
         if (equipmentSalesResult.error) throw equipmentSalesResult.error;
         if (equipmentInventoryResult.error) throw equipmentInventoryResult.error;
+        if (returnsResult.error) throw returnsResult.error;
 
         let movementRows = movementResult.data || [];
         let sourceNames = {};
@@ -205,6 +210,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
         if (!cancelled) {
           setShops(reportShops);
           setSales(salesResult.data || []);
+          setSalesReturns(returnsResult.data || []);
           setSaleItems(saleItemsResult.data || []);
           setEquipmentSaleItems(equipmentSalesResult.data || []);
           setMovements(movementRows);
@@ -231,6 +237,11 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
       if (!row) continue;
       row.salesTotal += Number(sale.total_amount || 0);
       row.transactions += 1;
+    }
+
+    for (const refund of salesReturns) {
+      const row = shopMap.get(refund.shop_id);
+      if (row) row.salesTotal -= Number(refund.total_amount || 0);
     }
 
     for (const item of saleItems) {
@@ -296,10 +307,17 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
       acc[method].amount += Number(sale.total_amount || 0);
       return acc;
     }, {});
+    for (const refund of salesReturns) {
+      const method = refund.refund_method || 'unknown';
+      if (!paymentSummary[method]) paymentSummary[method] = { method, count: 0, amount: 0 };
+      paymentSummary[method].amount -= Number(refund.total_amount || 0);
+    }
 
     return {
       shopRows: [...shopMap.values()],
-      totalSales: sales.reduce((total, sale) => total + Number(sale.total_amount || 0), 0),
+      totalSales: sales.reduce((total, sale) => total + Number(sale.total_amount || 0), 0)
+        - salesReturns.reduce((total, refund) => total + Number(refund.total_amount || 0), 0),
+      returnsAmount: salesReturns.reduce((total, refund) => total + Number(refund.total_amount || 0), 0),
       transactions: sales.length,
       unitsSold: saleItems.reduce((total, item) => total + Number(item.quantity || 0), 0)
         + equipmentSaleItems.reduce((total, item) => total + Number(item.quantity || 0), 0),
@@ -315,7 +333,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
       paymentRows: Object.values(paymentSummary).sort((a, b) => b.amount - a.amount),
       transferRows: movements.filter((row) => row.movement_type === 'transfer_out' || row.movement_type === 'transfer_in'),
     };
-  }, [shops, sales, saleItems, equipmentSaleItems, movements, currentInventory, equipmentInventory]);
+  }, [shops, sales, salesReturns, saleItems, equipmentSaleItems, movements, currentInventory, equipmentInventory]);
 
   const { label } = monthRange(month);
 
@@ -338,6 +356,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
 
       <section className="report-metrics" aria-label="Monthly organization summary">
         <article><span>Total sales</span><strong>{currency.format(report.totalSales)}</strong></article>
+        <article><span>Returns / refunds</span><strong>{currency.format(report.returnsAmount)}</strong></article>
         <article><span>Transactions</span><strong>{report.transactions}</strong></article>
         <article><span>Units sold</span><strong>{units(report.unitsSold)}</strong></article>
         <article><span>Units received</span><strong>{units(report.receivedUnits)}</strong></article>

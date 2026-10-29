@@ -44,6 +44,8 @@
   gap: 8px;
 }
 
+.pos-header-actions .button { white-space: nowrap; }
+
 .pos-sale-grid {
   flex: 1;
   min-height: 0;
@@ -113,6 +115,37 @@
   color: var(--text-muted);
   font-size: 12px;
 }
+
+.discount-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 7px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.discount-field input { width: 78px; height: 30px; padding: 4px 7px; }
+
+.return-workspace h2 { margin: 0 0 4px; font-size: 18px; }
+.return-workspace > .muted { margin: 0 0 14px; font-size: 13px; }
+.return-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.return-form h3 { margin: 0; font-size: 15px; }
+.return-form label { display: grid; gap: 5px; color: var(--text-muted); font-size: 12px; font-weight: 700; }
+.return-form input, .return-form select { min-height: 38px; padding: 7px 10px; }
+.return-form > strong { font-size: 15px; }
+.product-row.selected { border-color: var(--brand-primary); background: var(--brand-tint); }
+.return-summary { gap: 10px; }
+.return-summary .total-row { margin: 5px 0; }
+.return-summary .total-row span:last-child { font-size: 16px; }
 
 .product-price {
   flex: 0 0 auto;

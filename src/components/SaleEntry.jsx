@@ -33,6 +33,12 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
     setCart([]);
     setCheckoutError(null);
     setLastReceipt(null);
+    setReturnSearch('');
+    setReturnRows([]);
+    setSelectedReturnItem(null);
+    setReturnRequestId(null);
+    setReturnMessage('');
+    setReturnError('');
   }, [effectiveShopId]);
 
   // Reactive local query: joins batches + drugs from the local SQLite
@@ -78,6 +84,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
       try {
         const items = JSON.parse(row.items_json);
         for (const item of items) {
+          if (!item.batch_id) continue;
           map[item.batch_id] = (map[item.batch_id] || 0) + Number(item.quantity);
         }
       } catch {
@@ -139,6 +146,18 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
   const [status, setStatus] = useState('idle'); // idle | submitting | done
   const [checkoutError, setCheckoutError] = useState(null);
   const [lastReceipt, setLastReceipt] = useState(null);
+  const [pageMode, setPageMode] = useState('sale');
+  const [returnSearch, setReturnSearch] = useState('');
+  const [returnRows, setReturnRows] = useState([]);
+  const [selectedReturnItem, setSelectedReturnItem] = useState(null);
+  const [returnQty, setReturnQty] = useState(1);
+  const [refundMethod, setRefundMethod] = useState('cash');
+  const [returnReason, setReturnReason] = useState('Customer return');
+  const [returnRequestId, setReturnRequestId] = useState(null);
+  const [returnLoading, setReturnLoading] = useState(false);
+  const [returnSaving, setReturnSaving] = useState(false);
+  const [returnError, setReturnError] = useState('');
+  const [returnMessage, setReturnMessage] = useState('');
   const cartNeedsPrescription = cart.some((line) => line.requiresPrescription === true);
   const cartHasUnclassifiedDrug = cart.some((line) => line.requiresPrescription === null);
 
@@ -271,6 +290,95 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
 
   const lineKey = (line) => line.kind === 'equipment' ? `equipment:${line.item.id}` : `drug:${line.batch.id}`;
 
+  useEffect(() => {
+    if (!isActive || pageMode !== 'return' || !effectiveShopId || !syncStatus.connected) return undefined;
+    let cancelled = false;
+    async function loadReturnItems() {
+      setReturnLoading(true);
+      setReturnError('');
+      try {
+        const { data: sales, error: salesError } = await supabase.from('sales')
+          .select('id, sold_at, payment_method').eq('shop_id', effectiveShopId)
+          .order('sold_at', { ascending: false }).limit(200);
+        if (salesError) throw salesError;
+        const saleIds = (sales || []).map((sale) => sale.id);
+        if (!saleIds.length) { if (!cancelled) setReturnRows([]); return; }
+        const { data: items, error: itemsError } = await supabase.from('sale_items')
+          .select('id, sale_id, batch_id, quantity, unit_price, drugs(name), batches(batch_number, expiry_date)')
+          .in('sale_id', saleIds);
+        if (itemsError) throw itemsError;
+        const itemIds = (items || []).map((item) => item.id);
+        let returnedRows = [];
+        if (itemIds.length) {
+          const { data, error } = await supabase.from('sales_return_items')
+            .select('original_sale_item_id, quantity').in('original_sale_item_id', itemIds);
+          if (error) throw error;
+          returnedRows = data || [];
+        }
+        const returnedByItem = {};
+        for (const returned of returnedRows) returnedByItem[returned.original_sale_item_id] = (returnedByItem[returned.original_sale_item_id] || 0) + Number(returned.quantity || 0);
+        const saleById = Object.fromEntries((sales || []).map((sale) => [sale.id, sale]));
+        const mapped = (items || []).map((item) => ({
+          ...item,
+          sale: saleById[item.sale_id],
+          returned: Number(returnedByItem[item.id] || 0),
+          returnable: Math.max(0, Number(item.quantity || 0) - Number(returnedByItem[item.id] || 0)),
+        })).filter((item) => item.returnable > 0);
+        if (!cancelled) setReturnRows(mapped);
+      } catch (loadError) {
+        if (!cancelled) setReturnError(loadError.message || 'Could not load recent sales for returns.');
+      } finally {
+        if (!cancelled) setReturnLoading(false);
+      }
+    }
+    loadReturnItems();
+    return () => { cancelled = true; };
+  }, [effectiveShopId, isActive, pageMode, syncStatus.connected]);
+
+  const matchedReturnItems = useMemo(() => {
+    const term = returnSearch.trim().toLowerCase();
+    if (term.length < 2) return [];
+    return returnRows.filter((item) => (item.drugs?.name || '').toLowerCase().includes(term)
+      || item.sale?.id?.toLowerCase().includes(term));
+  }, [returnRows, returnSearch]);
+
+  async function processReturn() {
+    if (!selectedReturnItem || !syncStatus.connected || returnSaving) return;
+    setReturnSaving(true); setReturnError(''); setReturnMessage('');
+    try {
+      const clientReturnId = returnRequestId || crypto.randomUUID();
+      setReturnRequestId(clientReturnId);
+      const { data, error } = await supabase.rpc('return_sold_drug', {
+        p_sale_item_id: selectedReturnItem.id,
+        p_quantity: Number(returnQty),
+        p_refund_method: refundMethod,
+        p_reason: returnReason.trim() || 'Customer return',
+        p_client_return_id: clientReturnId,
+      });
+      if (error) throw error;
+      const returnId = Array.isArray(data) ? data[0] : data;
+      const refunded = Number(returnQty) * Number(selectedReturnItem.unit_price || 0);
+      setReturnMessage(`Return recorded (${returnId}). ${returnQty} unit(s), ${formatKes(refunded)} refund, returned to stock.`);
+      setSelectedReturnItem(null);
+      setReturnRequestId(null);
+      setReturnQty(1);
+      setReturnSearch('');
+      window.dispatchEvent(new CustomEvent('pharmacy-pos:data-changed', { detail: { type: 'return', shopId: effectiveShopId } }));
+      const { data: returned, error: returnedError } = await supabase.from('sales_return_items')
+        .select('original_sale_item_id, quantity').eq('original_sale_item_id', selectedReturnItem.id);
+      if (!returnedError) {
+        const returnedQty = (returned || []).reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+        setReturnRows((rows) => rows.map((row) => row.id === selectedReturnItem.id
+          ? { ...row, returned: returnedQty, returnable: Math.max(0, Number(row.quantity) - returnedQty) }
+          : row).filter((row) => row.returnable > 0));
+      }
+    } catch (error) {
+      setReturnError(error.message || 'Could not record the return.');
+    } finally {
+      setReturnSaving(false);
+    }
+  }
+
   function addToCart(drug, batch) {
     if (!batch || batch.available <= 0 || batch.expiry_date < new Date().toISOString().slice(0, 10)) return;
     setCart((prev) => {
@@ -287,6 +395,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
         drugName: drug.name,
         batch,
         qty: 1,
+        discountPercent: 0,
         requiresPrescription: drug.requiresPrescription,
       }];
     });
@@ -320,7 +429,10 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
     setCart((prev) => prev.filter((line) => lineKey(line) !== key));
   }
 
-  const linePrice = (line) => line.kind === 'equipment' ? line.item.selling_price : line.batch.selling_price;
+  const baseLinePrice = (line) => line.kind === 'equipment' ? line.item.selling_price : line.batch.selling_price;
+  const linePrice = (line) => line.kind === 'equipment'
+    ? Number(line.item.selling_price)
+    : Math.round(Number(line.batch.selling_price) * (1 - Number(line.discountPercent || 0) / 100) * 100) / 100;
   const total = cart.reduce((sum, line) => sum + line.qty * linePrice(line), 0);
 
   // Writes the sale into the LOCAL pending_sales queue — works offline.
@@ -349,7 +461,12 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
         unit_price: linePrice(line),
         ...(line.kind === 'equipment'
           ? { equipment_supply_id: line.item.id }
-          : { drug_id: line.drugId, batch_id: line.batch.id }),
+          : {
+            drug_id: line.drugId,
+            batch_id: line.batch.id,
+            original_unit_price: baseLinePrice(line),
+            discount_percent: Number(line.discountPercent || 0),
+          }),
       }));
 
       await db.execute(
@@ -370,6 +487,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
 
       if (!queueRow) {
         const soldByBatch = items.reduce((acc, item) => {
+          if (!item.batch_id) return acc;
           const cartLine = cart.find((line) => line.kind === 'drug' && line.batch.id === item.batch_id);
           const existing = acc[item.batch_id] || { quantity: 0, originalQuantity: Number(cartLine?.batch?.quantity_remaining || 0) };
           existing.quantity += Number(item.quantity || 0);
@@ -434,6 +552,8 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
           {activeShopName && <p>Selling from {activeShopName}</p>}
         </div>
         <div className="pos-header-actions">
+          <button type="button" className={`button ${pageMode === 'sale' ? 'secondary' : 'ghost'}`} onClick={() => setPageMode('sale')}>New sale</button>
+          <button type="button" className={`button ${pageMode === 'return' ? 'secondary' : 'ghost'}`} onClick={() => { setPageMode('return'); setSelectedReturnItem(null); setReturnMessage(''); setReturnError(''); }}>Return</button>
           <button type="button" className="button secondary" onClick={() => retryFetchStaff()}>
             {retrying ? 'Retrying…' : 'Retry staff sync'}
           </button>
@@ -454,6 +574,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
 
       <div className="pos-sale-grid">
         <section className="product-pane" aria-label="Product search">
+          {pageMode === 'sale' ? <>
           <input
             className="search-input"
             autoFocus
@@ -517,9 +638,35 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
               Start typing to find a drug or medical equipment. Drug batches and equipment prices appear as separate stock lines.
             </div>
           )}
+          </> : <div className="return-workspace">
+            <h2>Return a sold drug</h2>
+            <p className="muted">Search the latest sales, select the original sale line, then enter the quantity to return.</p>
+            {!syncStatus.connected && <p className="inline-error">Returns require an internet connection so stock and refund records update together.</p>}
+            <input className="search-input" value={returnSearch} onChange={(event) => { setReturnSearch(event.target.value); setSelectedReturnItem(null); }} placeholder="Search by drug name or sale ID…" disabled={!syncStatus.connected} />
+            {returnLoading && <p className="muted">Loading recent sale items…</p>}
+            {returnSearch.trim().length < 2 && <p className="empty-state">Enter at least two characters to find a sale line.</p>}
+            {matchedReturnItems.map((item) => (
+              <button type="button" key={item.id} className={`product-row ${selectedReturnItem?.id === item.id ? 'selected' : ''}`} onClick={() => { setSelectedReturnItem(item); setReturnQty(1); setReturnRequestId(crypto.randomUUID()); }}>
+                <div><div className="product-title">{item.drugs?.name || 'Drug'}<span className="mini-badge">Returnable: {item.returnable}</span></div>
+                  <div className="product-meta">Sold {item.sale?.sold_at ? new Date(item.sale.sold_at).toLocaleString('en-KE') : 'date unavailable'} · Batch {item.batches?.batch_number || 'N/A'} · {formatKes(Number(item.unit_price || 0))} each</div>
+                </div><div className="product-price">{String(item.sale_id).slice(0, 8)}<small>Sale ID</small></div>
+              </button>
+            ))}
+            {returnSearch.trim().length >= 2 && !returnLoading && matchedReturnItems.length === 0 && <p className="empty-state">No unreturned sale items match that search in the latest 200 sales.</p>}
+            {selectedReturnItem && <div className="return-form">
+              <h3>{selectedReturnItem.drugs?.name} · {formatKes(Number(selectedReturnItem.unit_price || 0))} refund per unit</h3>
+              <label>Quantity to return<input type="number" min="1" max={selectedReturnItem.returnable} step="1" value={returnQty} onChange={(event) => { setReturnQty(Math.max(1, Math.min(Number(event.target.value) || 1, selectedReturnItem.returnable))); setReturnRequestId(null); }} /></label>
+              <label>Refund method<select value={refundMethod} onChange={(event) => { setRefundMethod(event.target.value); setReturnRequestId(null); }}><option value="cash">Cash</option><option value="mpesa">M-Pesa</option><option value="card">Card</option><option value="insurance">Insurance</option><option value="sha">SHA</option></select></label>
+              <label>Reason<input value={returnReason} onChange={(event) => { setReturnReason(event.target.value); setReturnRequestId(null); }} /></label>
+              <strong>Refund total: {formatKes(Number(returnQty) * Number(selectedReturnItem.unit_price || 0))}</strong>
+              <button type="button" className="complete-sale" disabled={!syncStatus.connected || returnSaving || returnQty < 1} onClick={processReturn}>{returnSaving ? 'Recording return…' : 'Record return and restore stock'}</button>
+            </div>}
+            {returnMessage && <div className="inline-success">{returnMessage}</div>}
+            {returnError && <div className="inline-error">{returnError}</div>}
+          </div>}
         </section>
 
-        <aside className="checkout-pane" aria-label="Checkout">
+        {pageMode === 'sale' ? <aside className="checkout-pane" aria-label="Checkout">
           <div className="cart-heading">Cart ({cart.length})</div>
 
           <div className="cart-list">
@@ -531,7 +678,13 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
                   {line.kind === 'equipment'
                     ? <div className="cart-meta">Medical equipment · {line.item.unit}</div>
                     : <div className="cart-meta">Batch {line.batch.batch_number || 'N/A'} · exp {line.batch.expiry_date}</div>}
-                  <div className="cart-meta">{formatKes(linePrice(line))} each</div>
+                  {line.kind === 'drug' && <label className="discount-field">Discount %
+                    <input type="number" min="0" max="100" step="0.01" value={line.discountPercent || 0} onChange={(event) => {
+                      const discountPercent = Math.max(0, Math.min(100, Number(event.target.value) || 0));
+                      setCart((current) => current.map((item) => lineKey(item) === lineKey(line) ? { ...item, discountPercent } : item));
+                    }} />
+                  </label>}
+                  <div className="cart-meta">{line.discountPercent > 0 ? <><s>{formatKes(baseLinePrice(line))}</s> → </> : null}{formatKes(linePrice(line))} each</div>
                 </div>
                 <div className="cart-controls">
                   <button type="button" onClick={() => updateQty(lineKey(line), -1)}>-</button>
@@ -598,7 +751,16 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
               </div>
             )}
           </div>
-        </aside>
+        </aside> : <aside className="checkout-pane return-summary" aria-label="Return summary">
+          <div className="cart-heading">Return summary</div>
+          {selectedReturnItem ? <>
+            <div className="cart-drug">{selectedReturnItem.drugs?.name}</div>
+            <div className="cart-meta">Sale {String(selectedReturnItem.sale_id).slice(0, 8)} · {new Date(selectedReturnItem.sale?.sold_at).toLocaleDateString('en-KE')}</div>
+            <div className="total-row"><span>Quantity</span><span>{returnQty} / {selectedReturnItem.returnable}</span></div>
+            <div className="total-row"><span>Refund</span><span>{formatKes(Number(returnQty) * Number(selectedReturnItem.unit_price || 0))}</span></div>
+            <p className="muted">The return is recorded against the original sale and the same batch stock is restored.</p>
+          </> : <p className="empty-state">Select a sale item to prepare its return.</p>}
+        </aside>}
       </div>
     </div>
   );
