@@ -7,6 +7,7 @@ import { ensureLocalStaff } from './lib/staff';
 import { canManageStockedDrugs, canReceiveStock, isAdminRole } from './lib/roles';
 import { defaultBrandColor, applyBrandTheme, applyCachedThemeIfAny, cacheTheme } from './lib/theme';
 import Login from './components/Login';
+import PageErrorBoundary from './components/PageErrorBoundary';
 import './App.css';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -282,6 +283,7 @@ export default function App() {
           <main className="app-content">
             {ActivePageComponent ? (
               <div className="app-page-panel" aria-live="polite">
+                <PageErrorBoundary key={page}>
                 <Suspense fallback={<div className="app-page-loading">Loading page…</div>}>
                   <ActivePageComponent
                     activeShopId={activeShopId}
@@ -292,6 +294,7 @@ export default function App() {
                     isActive
                   />
                 </Suspense>
+                </PageErrorBoundary>
               </div>
             ) : null}
           </main>

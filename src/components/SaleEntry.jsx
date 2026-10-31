@@ -382,11 +382,11 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
   function addToCart(drug, batch) {
     if (!batch || batch.available <= 0 || batch.expiry_date < new Date().toISOString().slice(0, 10)) return;
     setCart((prev) => {
-      const existing = prev.find((line) => line.batch.id === batch.id);
+      const existing = prev.find((line) => line.kind !== 'equipment' && line.batch.id === batch.id);
       if (existing) {
         if (existing.qty >= batch.available) return prev;
         return prev.map((line) =>
-          line.batch.id === batch.id ? { ...line, qty: line.qty + 1 } : line
+          line.kind !== 'equipment' && line.batch.id === batch.id ? { ...line, qty: line.qty + 1 } : line
         );
       }
       return [...prev, {
