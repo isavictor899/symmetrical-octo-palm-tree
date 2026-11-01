@@ -6,6 +6,7 @@ import { column, Schema, Table } from '@powersync/web';
 // column; PowerSync adds that automatically.
 
 const drugs = new Table({
+  owner_shop_id: column.text, // null = shared catalogue; set = private to that shop
   name: column.text,
   generic_name: column.text,
   category: column.text,

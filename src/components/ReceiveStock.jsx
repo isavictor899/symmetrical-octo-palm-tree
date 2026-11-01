@@ -220,15 +220,20 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
     event.preventDefault();
     setSaving(true); setError(''); setMessage('');
     try {
-      const { data, error: insertError } = await supabase.from('drugs').insert({
-        name: newDrug.name.trim(),
-        generic_name: newDrug.generic_name.trim() || null,
-        category: newDrug.category.trim() || null,
-        form: newDrug.form.trim() || null,
-        strength: newDrug.strength.trim() || null,
-        unit_of_sale: newDrug.unit_of_sale.trim() || null,
-      }).select('id, name, generic_name').single();
-      if (insertError) throw insertError;
+      if (!effectiveShopId) throw new Error('No shop is selected for this drug.');
+      // Creates a drug private to this shop. It is never written to the shared catalogue.
+      const { data: created, error: rpcError } = await supabase.rpc('create_shop_drug', {
+        p_shop_id: effectiveShopId,
+        p_name: newDrug.name.trim(),
+        p_generic_name: newDrug.generic_name.trim() || null,
+        p_category: newDrug.category.trim() || null,
+        p_form: newDrug.form.trim() || null,
+        p_strength: newDrug.strength.trim() || null,
+        p_unit_of_sale: newDrug.unit_of_sale.trim() || null,
+      });
+      if (rpcError) throw rpcError;
+      const row = Array.isArray(created) ? created[0] : created;
+      const data = { id: row.drug_id, name: row.drug_name, generic_name: row.drug_generic_name };
       chooseDrug(data);
       setReceiptType('drug');
       setSearchFullCatalog(true);
