@@ -120,6 +120,9 @@ export default function Login({ recoveryMode = false, onRecoveryComplete }) {
           {isResetRequest ? 'Back to sign in' : 'Forgot password?'}
         </button>}
       </form>
+      <p className="login-copyright">
+        © 2026 <span className="login-copyright-brand"><img src="/enora-icon.svg" alt="" /> Enora</span> Labs. All rights reserved
+      </p>
     </div>
   );
 }
