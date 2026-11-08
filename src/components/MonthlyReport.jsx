@@ -454,7 +454,15 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
       const { data, error: functionError } = await supabase.functions.invoke('monthly-report-insights', {
         body: { month, shopIds: shops.map((shop) => shop.id), analytics },
       });
-      if (functionError) throw functionError;
+      if (functionError) {
+        const response = functionError.context;
+        let responseError = '';
+        if (response && typeof response.clone === 'function') {
+          const responseBody = await response.clone().json().catch(() => null);
+          responseError = responseBody?.error || responseBody?.message || '';
+        }
+        throw new Error(responseError || functionError.message || 'The AI function returned an error.');
+      }
       if (!data?.insights) throw new Error('The AI service returned no report insights.');
       if (requestId !== insightsRequestIdRef.current) return;
       setAiInsights(data.insights);
