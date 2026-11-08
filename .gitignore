@@ -15,6 +15,9 @@ supabase/*
 !supabase/migrations/
 supabase/migrations/*
 !supabase/migrations/*.sql
+!supabase/config.toml
+!supabase/functions/
+!supabase/functions/**
 
 # Editor directories and files
 .vscode/*

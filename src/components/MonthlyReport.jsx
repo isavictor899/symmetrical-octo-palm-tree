@@ -66,7 +66,7 @@ function topRows(rows, count = 8) {
 }
 
 function leastRows(rows, count = 8) {
-  return [...rows].filter((row) => row.quantity > 0).sort((a, b) => a.quantity - b.quantity || a.amount - b.amount).slice(0, count);
+  return [...rows].sort((a, b) => a.quantity - b.quantity || a.amount - b.amount).slice(0, count);
 }
 
 function emptyShopReport(shop) {
@@ -85,6 +85,8 @@ function emptyShopReport(shop) {
 export default function MonthlyReport({ organizationShops = [], dataVersion = 0, isActive = true }) {
   const gate = useRefreshGate(isActive, dataVersion);
   const showingMonthRef = useRef(null);
+  const autoInsightsMonthRef = useRef(null);
+  const insightsRequestIdRef = useRef(0);
   const [month, setMonth] = useState(currentMonthValue());
   const [shops, setShops] = useState(organizationShops);
   const [sales, setSales] = useState([]);
@@ -97,6 +99,16 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
   const [sourceShopNames, setSourceShopNames] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [reportRefreshKey, setReportRefreshKey] = useState(0);
+  const [aiInsights, setAiInsights] = useState('');
+  const [aiError, setAiError] = useState('');
+  const [generatingInsights, setGeneratingInsights] = useState(false);
+  const [transferSelection, setTransferSelection] = useState(null);
+  const [transferSourceShopId, setTransferSourceShopId] = useState('');
+  const [transferBatchId, setTransferBatchId] = useState('');
+  const [transferQuantity, setTransferQuantity] = useState('1');
+  const [savingTransfer, setSavingTransfer] = useState(false);
+  const [transferMessage, setTransferMessage] = useState('');
 
   useEffect(() => {
     if (organizationShops.length) setShops(organizationShops);
@@ -159,7 +171,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
             .lt('created_at', endIso)
             .order('created_at', { ascending: false }),
           supabase.from('batches')
-            .select('shop_id, drug_id, quantity_remaining, selling_price, expiry_date, drugs(name, generic_name)')
+            .select('id, shop_id, drug_id, quantity_remaining, selling_price, expiry_date, drugs(name, generic_name)')
             .in('shop_id', shopIds),
           supabase.from('equipment_sale_items')
             .select('equipment_supply_id, quantity, unit_price, equipment_supplies(name, unit), sales!inner(shop_id, sold_at)')
@@ -227,7 +239,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
 
     loadReport();
     return () => { cancelled = true; };
-  }, [month, organizationShops, gate]);
+  }, [month, organizationShops, gate, reportRefreshKey]);
 
   const report = useMemo(() => {
     const shopMap = new Map(shops.map((shop) => [shop.id, emptyShopReport(shop)]));
@@ -269,6 +281,18 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
       (item) => item.quantity,
       (item) => Number(item.quantity || 0) * Number(item.unit_price || 0)
     );
+    const slowSellingCandidates = new Map(soldDrugs.map((drug) => [drug.id, drug]));
+    for (const stock of currentInventory) {
+      const id = stock.drug_id;
+      if (!id || slowSellingCandidates.has(id)) continue;
+      slowSellingCandidates.set(id, {
+        id,
+        name: stock.drugs?.name || 'Unknown drug',
+        generic: stock.drugs?.generic_name || '',
+        quantity: 0,
+        amount: 0,
+      });
+    }
     const soldEquipment = equipmentSaleItems.reduce((grouped, item) => {
       const id = item.equipment_supply_id;
       const row = grouped.get(id) || { id, name: item.equipment_supplies?.name || 'Equipment', generic: item.equipment_supplies?.unit || '', quantity: 0, amount: 0 };
@@ -324,7 +348,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
       receivedUnits: movements.filter((row) => row.movement_type === 'received').reduce((total, row) => total + Number(row.quantity || 0), 0),
       transferredOutUnits: movements.filter((row) => row.movement_type === 'transfer_out').reduce((total, row) => total + Number(row.quantity || 0), 0),
       topSelling: topRows(soldDrugs),
-      leastSelling: leastRows(soldDrugs),
+      leastSelling: leastRows([...slowSellingCandidates.values()]),
       soldEquipment: topRows([...soldEquipment.values()]),
       currentEquipment: topRows([...currentEquipment.values()], 12),
       receivedDrugs: topRows(receivedDrugs, 10),
@@ -336,6 +360,157 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
   }, [shops, sales, salesReturns, saleItems, equipmentSaleItems, movements, currentInventory, equipmentInventory]);
 
   const { label } = monthRange(month);
+
+  const transferSuggestions = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const isUnexpired = (batch) => !batch.expiry_date || String(batch.expiry_date).slice(0, 10) >= today;
+    const soldByShopDrug = new Map();
+    for (const item of saleItems) {
+      const shopId = item.sales?.shop_id;
+      const drugId = item.drug_id || item.drugs?.id;
+      if (!shopId || !drugId) continue;
+      const key = `${shopId}:${drugId}`;
+      soldByShopDrug.set(key, (soldByShopDrug.get(key) || 0) + Number(item.quantity || 0));
+    }
+
+    const stockByShopDrug = new Map();
+    for (const batch of currentInventory) {
+      const key = `${batch.shop_id}:${batch.drug_id}`;
+      const rows = stockByShopDrug.get(key) || [];
+      rows.push(batch);
+      stockByShopDrug.set(key, rows);
+    }
+
+    const suggestions = [];
+    for (const target of shops) {
+      for (const [key, targetSold] of soldByShopDrug) {
+        if (!key.startsWith(`${target.id}:`) || targetSold < 2) continue;
+        const drugId = key.slice(target.id.length + 1);
+        const targetBatches = (stockByShopDrug.get(key) || []).filter(isUnexpired);
+        const targetStock = targetBatches.reduce((sum, batch) => sum + Number(batch.quantity_remaining || 0), 0);
+        const shortage = Math.max(0, targetSold - targetStock);
+        if (!shortage) continue;
+
+        const donors = shops.filter((shop) => shop.id !== target.id).map((shop) => {
+          const batches = (stockByShopDrug.get(`${shop.id}:${drugId}`) || [])
+            .filter((batch) => Number(batch.quantity_remaining || 0) > 0 && isUnexpired(batch))
+            .sort((a, b) => String(a.expiry_date || '9999-12-31').localeCompare(String(b.expiry_date || '9999-12-31')));
+          const donorSold = soldByShopDrug.get(`${shop.id}:${drugId}`) || 0;
+          const donorOnHand = batches.reduce((sum, batch) => sum + Number(batch.quantity_remaining || 0), 0);
+          let remainingSurplus = Math.max(0, donorOnHand - donorSold);
+          const transferableBatches = batches.map((batch) => {
+            const transferable = Math.min(Number(batch.quantity_remaining || 0), remainingSurplus);
+            remainingSurplus -= transferable;
+            return { ...batch, transferable };
+          }).filter((batch) => batch.transferable > 0);
+          const available = transferableBatches.reduce((sum, batch) => sum + batch.transferable, 0);
+          return { ...shop, batches: transferableBatches, available };
+        }).filter((shop) => shop.available > 0).sort((a, b) => b.available - a.available);
+
+        if (donors.length) {
+          suggestions.push({
+            drugId,
+            drugName: targetBatches[0]?.drugs?.name || saleItems.find((row) => row.drug_id === drugId)?.drugs?.name || 'Drug',
+            targetShopId: target.id,
+            targetShopName: target.name || 'Shop',
+            targetSold,
+            targetStock,
+            shortage,
+            donors,
+          });
+        }
+      }
+    }
+    return suggestions.sort((a, b) => b.shortage - a.shortage || b.targetSold - a.targetSold).slice(0, 5);
+  }, [shops, saleItems, currentInventory]);
+
+  useEffect(() => {
+    setAiInsights('');
+    setAiError('');
+    insightsRequestIdRef.current += 1;
+    setGeneratingInsights(false);
+  }, [month]);
+
+  async function generateInsights() {
+    if (generatingInsights) return;
+    const requestId = ++insightsRequestIdRef.current;
+    setGeneratingInsights(true);
+    setAiError('');
+    setAiInsights('');
+    try {
+      const analytics = {
+        totalSales: report.totalSales,
+        returnsAmount: report.returnsAmount,
+        transactions: report.transactions,
+        unitsSold: report.unitsSold,
+        topSelling: report.topSelling.slice(0, 8).map(({ name, quantity, amount }) => ({ name, quantity, amount })),
+        leastSelling: report.leastSelling.slice(0, 8).map(({ name, quantity, amount }) => ({ name, quantity, amount })),
+        shops: report.shopRows.map(({ name, salesTotal, transactions, unitsSold }) => ({ name, salesTotal, transactions, unitsSold })),
+        stockTransferOpportunities: transferSuggestions.map(({ drugName, targetShopName, targetSold, targetStock, donors }) => ({
+          drugName, targetShopName, targetSold, targetStock,
+          possibleSources: donors.map(({ name, available }) => ({ shopName: name, available })),
+        })),
+      };
+      const { data, error: functionError } = await supabase.functions.invoke('monthly-report-insights', {
+        body: { month, shopIds: shops.map((shop) => shop.id), analytics },
+      });
+      if (functionError) throw functionError;
+      if (!data?.insights) throw new Error('The AI service returned no report insights.');
+      if (requestId !== insightsRequestIdRef.current) return;
+      setAiInsights(data.insights);
+    } catch (insightError) {
+      if (requestId === insightsRequestIdRef.current) setAiError(insightError.message || 'Unable to generate AI insights. Check the AI function setup and try again.');
+    } finally {
+      if (requestId === insightsRequestIdRef.current) setGeneratingInsights(false);
+    }
+  }
+
+  useEffect(() => {
+    if (loading || error || !shops.length || showingMonthRef.current !== month || autoInsightsMonthRef.current === month) return;
+    autoInsightsMonthRef.current = month;
+    generateInsights();
+  }, [loading, error, month]);
+
+  function openTransferSuggestion(suggestion) {
+    const firstDonor = suggestion.donors[0];
+    const firstBatch = firstDonor?.batches[0];
+    setTransferSelection(suggestion);
+    setTransferSourceShopId(firstDonor?.id || '');
+    setTransferBatchId(firstBatch?.id || '');
+    setTransferQuantity(String(Math.min(suggestion.shortage, firstBatch?.transferable || 1)));
+    setTransferMessage('');
+  }
+
+  async function saveSuggestedTransfer(event) {
+    event.preventDefault();
+    if (!transferSelection || savingTransfer) return;
+    const selectedDonor = transferSelection.donors.find((shop) => shop.id === transferSourceShopId);
+    const batch = selectedDonor?.batches.find((item) => item.id === transferBatchId);
+    const quantity = Number(transferQuantity);
+    if (!batch || !Number.isInteger(quantity) || quantity < 1 || quantity > batch.transferable || quantity > transferSelection.shortage) {
+      setAiError('Choose a valid batch and quantity within the suggested stock limits.');
+      return;
+    }
+
+    setSavingTransfer(true);
+    setAiError('');
+    try {
+      const { error: transferError } = await supabase.rpc('transfer_stock_between_shops', {
+        p_from_shop_id: transferSourceShopId,
+        p_to_shop_id: transferSelection.targetShopId,
+        p_batch_id: transferBatchId,
+        p_quantity: quantity,
+      });
+      if (transferError) throw transferError;
+      setTransferMessage(`${quantity} unit${quantity === 1 ? '' : 's'} of ${transferSelection.drugName} transferred to ${transferSelection.targetShopName}.`);
+      setTransferSelection(null);
+      setReportRefreshKey((key) => key + 1);
+    } catch (transferError) {
+      setAiError(transferError.message || 'Unable to transfer the selected stock.');
+    } finally {
+      setSavingTransfer(false);
+    }
+  }
 
   if (loading) return <main className="monthly-report"><p>Loading monthly report…</p></main>;
   if (error) return <main className="monthly-report"><p className="error">{error}</p></main>;
@@ -354,6 +529,8 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
         </label>
       </header>
 
+      <div className="monthly-report-layout">
+        <div className="monthly-report-data">
       <section className="report-metrics" aria-label="Monthly organization summary">
         <article><span>Total sales</span><strong>{currency.format(report.totalSales)}</strong></article>
         <article><span>Returns / refunds</span><strong>{currency.format(report.returnsAmount)}</strong></article>
@@ -418,6 +595,85 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
           )}
         </article>
       </section>
+        </div>
+
+        <aside className="monthly-ai-panel" aria-label="AI monthly report insights">
+          <div className="monthly-ai-heading">
+            <div><p className="eyebrow">Report assistant</p><h2>Monthly insights</h2></div>
+            <span className="ai-badge">AI</span>
+          </div>
+          <p className="muted small">A short read of sales movement and possible stock balancing for {label}.</p>
+          <button type="button" className="monthly-ai-button" onClick={generateInsights} disabled={generatingInsights}>
+            {generatingInsights ? 'Reading report…' : aiInsights ? 'Refresh AI insights' : 'Generate AI insights'}
+          </button>
+          {aiInsights ? <p className="monthly-ai-output">{aiInsights}</p> : <p className="monthly-ai-placeholder">Generate a briefing based on this month’s aggregated report data.</p>}
+          {aiError ? <p className="monthly-ai-error" role="alert">{aiError}</p> : null}
+          <p className="monthly-ai-disclaimer">Medicine sales are stock and demand signals only; they cannot establish community health rates. The AI request sends aggregated report totals, medicine names and sales, and shop summaries to Google Gemini. No customer, staff, or transaction-level records are sent. Use a paid Gemini API project for real business data.</p>
+
+          <div className="monthly-ai-lists">
+            <section>
+              <h3>Best sellers</h3>
+              {!report.topSelling.length ? <p className="muted small">No drug sales this month.</p> : report.topSelling.slice(0, 4).map((item, index) => (
+                <div className="monthly-ai-list-row" key={`best-${item.id}`}><span>{index + 1}. {item.name}</span><strong>{units(item.quantity)}</strong></div>
+              ))}
+            </section>
+            <section>
+              <h3>Slow movers</h3>
+              {!report.leastSelling.length ? <p className="muted small">No sold drugs to compare.</p> : report.leastSelling.slice(0, 4).map((item) => (
+                <div className="monthly-ai-list-row" key={`slow-${item.id}`}><span>{item.name}</span><strong>{units(item.quantity)}</strong></div>
+              ))}
+            </section>
+          </div>
+
+          <section className="monthly-transfer-suggestions">
+            <h3>Possible stock transfers</h3>
+            {!transferSuggestions.length ? <p className="muted small">No clear transfer matches. Suggestions appear when another shop has stock above this month’s sales and a receiving shop has sold more than its current stock.</p> : transferSuggestions.map((suggestion) => (
+              <article className="monthly-transfer-card" key={`${suggestion.targetShopId}-${suggestion.drugId}`}>
+                <strong>{suggestion.drugName}</strong>
+                <p>{suggestion.targetShopName}: {units(suggestion.targetSold)} sold, {units(suggestion.targetStock)} currently on hand.</p>
+                <small>Potential source: {suggestion.donors[0].name} ({units(suggestion.donors[0].available)} above its monthly sales)</small>
+                <button type="button" className="monthly-transfer-button" onClick={() => openTransferSuggestion(suggestion)}>Review transfer</button>
+              </article>
+            ))}
+          </section>
+
+          {transferMessage ? <p className="monthly-transfer-success" role="status">{transferMessage}</p> : null}
+          {transferSelection ? (
+            <form className="monthly-transfer-form" onSubmit={saveSuggestedTransfer}>
+              <h3>Transfer {transferSelection.drugName}</h3>
+              <p className="muted small">To {transferSelection.targetShopName} · suggested need up to {units(transferSelection.shortage)}</p>
+              <label>From shop
+                <select value={transferSourceShopId} onChange={(event) => {
+                  const nextShopId = event.target.value;
+                  const nextDonor = transferSelection.donors.find((shop) => shop.id === nextShopId);
+                  const nextBatch = nextDonor?.batches[0];
+                  setTransferSourceShopId(nextShopId);
+                  setTransferBatchId(nextBatch?.id || '');
+                  setTransferQuantity(String(Math.min(transferSelection.shortage, nextBatch?.transferable || 1)));
+                }}>
+                  {transferSelection.donors.map((shop) => <option key={shop.id} value={shop.id}>{shop.name} · {units(shop.available)} available</option>)}
+                </select>
+              </label>
+              <label>Batch
+                <select value={transferBatchId} onChange={(event) => {
+                  const batch = transferSelection.donors.find((shop) => shop.id === transferSourceShopId)?.batches.find((item) => item.id === event.target.value);
+                  setTransferBatchId(event.target.value);
+                  setTransferQuantity(String(Math.min(transferSelection.shortage, batch?.transferable || 1)));
+                }}>
+                  {transferSelection.donors.find((shop) => shop.id === transferSourceShopId)?.batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.expiry_date ? `Expires ${batch.expiry_date} · ` : ''}{units(batch.transferable)} transferable</option>)}
+                </select>
+              </label>
+              <label>Quantity
+                <input type="number" min="1" max={Math.min(transferSelection.shortage, transferSelection.donors.find((shop) => shop.id === transferSourceShopId)?.batches.find((batch) => batch.id === transferBatchId)?.transferable || 1)} step="1" value={transferQuantity} onChange={(event) => setTransferQuantity(event.target.value)} required />
+              </label>
+              <div className="monthly-transfer-actions">
+                <button type="submit" className="monthly-transfer-button" disabled={savingTransfer}>{savingTransfer ? 'Transferring…' : 'Transfer stock'}</button>
+                <button type="button" className="monthly-transfer-cancel" onClick={() => setTransferSelection(null)}>Cancel</button>
+              </div>
+            </form>
+          ) : null}
+        </aside>
+      </div>
     </main>
   );
 }

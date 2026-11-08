@@ -1,0 +1,2 @@
+[functions.monthly-report-insights]
+verify_jwt = true
