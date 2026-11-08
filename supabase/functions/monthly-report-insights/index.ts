@@ -114,7 +114,7 @@ Deno.serve(async (request) => {
     const promptData = JSON.stringify({ month, analytics });
     if (promptData.length > 16_000) return jsonResponse({ error: 'The report data exceeds the AI summary limit.' }, 413);
 
-    const geminiResponse = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
+    const geminiResponse = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiApiKey },
       body: JSON.stringify({
@@ -126,8 +126,10 @@ Deno.serve(async (request) => {
 
     const geminiPayload = await geminiResponse.json().catch(() => ({}));
     if (!geminiResponse.ok) {
-      console.error('Gemini report request failed:', geminiResponse.status, geminiPayload?.error?.status || 'API error');
-      return jsonResponse({ error: 'The AI service could not generate insights right now. Please try again.' }, 502);
+      const providerStatus = String(geminiPayload?.error?.status || 'API_ERROR').slice(0, 80);
+      const providerMessage = String(geminiPayload?.error?.message || 'No provider details were returned.').slice(0, 240);
+      console.error('Gemini report request failed:', geminiResponse.status, providerStatus, providerMessage);
+      return jsonResponse({ error: `Gemini API error (${geminiResponse.status} ${providerStatus}): ${providerMessage}` }, 502);
     }
     const insights = geminiPayload?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || '').join('').trim();
     if (!insights) return jsonResponse({ error: 'The AI service returned an empty briefing. Please try again.' }, 502);
