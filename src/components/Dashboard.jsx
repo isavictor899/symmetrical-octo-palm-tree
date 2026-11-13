@@ -228,7 +228,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
         // Phase 2: load less-critical / heavier datasets in the background.
         setLoadingMore(true);
         try {
-          const [itemsResult, batchesResult, policyResult, receivedResult, equipmentResult, equipmentSalesResult, returnsResult, discountsResult, staffResult] = await Promise.all([
+          const [itemsResult, batchesResult, policyResult, receivedResult, equipmentResult, equipmentSalesResult, returnsResult, discountsResult] = await Promise.all([
             supabase.from('sale_items').select('id, sale_id, drug_id, quantity, unit_price, drugs(name), sales!inner(id, shop_id, sold_at, total_amount, payment_method)')
               .eq('sales.shop_id', selectedShopId).gte('sales.sold_at', today),
             supabase.from('batches').select('id, drug_id, batch_number, expiry_date, quantity_remaining, drugs(name)')
@@ -249,12 +249,9 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
             supabase.from('sales_returns').select('id, total_amount, refund_method, created_at')
               .eq('shop_id', selectedShopId).gte('created_at', today),
             supabase.from('sale_item_discounts')
-              .select('sale_item_id, original_unit_price, discount_amount, discount_percent, discounted_by, created_at, sale_items!inner(quantity, drugs(name))')
+              .select('sale_item_id, original_unit_price, discount_amount, discount_percent, discounted_by, discounted_by_name, discounted_by_role, created_at, sale_items!inner(quantity, drugs(name))')
               .eq('shop_id', selectedShopId).gte('created_at', today).gt('discount_amount', 0)
               .order('created_at', { ascending: false }),
-            supabase.from('staff')
-              .select('auth_user_id, full_name, role')
-              .eq('shop_id', selectedShopId),
           ]);
           for (const result of [itemsResult, batchesResult, policyResult]) {
             if (result.error) throw result.error;
@@ -267,9 +264,6 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
             // the discount migration has not been applied yet must not break
             // the rest of the dashboard.
             console.warn('Discount summary unavailable:', discountsResult.error.message);
-          }
-          if (staffResult.error) {
-            console.warn('Staff lookup unavailable:', staffResult.error.message);
           }
 
           let receivedRows = receivedResult.data || [];
@@ -394,20 +388,16 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
               sellingPrice: Number(row.selling_price || 0),
             })));
             setTodayReturns(returnsResult.data || []);
-            const staffByAuthUserId = Object.fromEntries(
-              (staffResult.data || []).map((member) => [member.auth_user_id, member])
-            );
-            setTodayDiscounts((discountsResult.data || []).map((row) => {
-              const member = staffByAuthUserId[row.discounted_by];
-              return {
-                id: row.sale_item_id,
-                name: row.sale_items?.drugs?.name || 'Product',
-                quantity: Number(row.sale_items?.quantity || 1),
-                discountAmount: Number(row.discount_amount || 0),
-                staffName: member?.full_name || 'Unknown staff',
-                staffRole: member?.role || '',
-              };
-            }));
+            setTodayDiscounts((discountsResult.data || []).map((row) => ({
+              id: row.sale_item_id,
+              name: row.sale_items?.drugs?.name || 'Product',
+              quantity: Number(row.sale_items?.quantity || 1),
+              discountAmount: Number(row.discount_amount || 0),
+              // Snapshotted at the time of the discount, so it does not depend
+              // on the staff table's RLS visibility.
+              staffName: row.discounted_by_name || 'Unknown staff',
+              staffRole: row.discounted_by_role || '',
+            })));
           }
         } catch (bgErr) {
           if (!cancelled) setError(bgErr.message || 'Unable to load some dashboard data.');
