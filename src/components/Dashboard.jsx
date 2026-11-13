@@ -99,6 +99,12 @@ function movementLabel(movement, sourceShopNames = {}) {
   return 'Received from supplier';
 }
 
+function roleLabel(role) {
+  const value = String(role || '').trim();
+  if (!value) return 'Unknown role';
+  return value.replace(/[_-]+/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 export default function Dashboard({ activeShopId, activeShopName, organizationShops = [], onActiveShopChange, dataVersion = 0, isActive = true }) {
   const gate = useRefreshGate(isActive, dataVersion);
   const showingShopRef = useRef(null);
@@ -115,6 +121,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
   const [sourceShopNames, setSourceShopNames] = useState({});
   const [expiredStock, setExpiredStock] = useState([]);
   const [equipmentStock, setEquipmentStock] = useState([]);
+  const [todayDiscounts, setTodayDiscounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
@@ -221,7 +228,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
         // Phase 2: load less-critical / heavier datasets in the background.
         setLoadingMore(true);
         try {
-          const [itemsResult, batchesResult, policyResult, receivedResult, equipmentResult, equipmentSalesResult, returnsResult] = await Promise.all([
+          const [itemsResult, batchesResult, policyResult, receivedResult, equipmentResult, equipmentSalesResult, returnsResult, discountsResult, staffResult] = await Promise.all([
             supabase.from('sale_items').select('id, sale_id, drug_id, quantity, unit_price, drugs(name), sales!inner(id, shop_id, sold_at, total_amount, payment_method)')
               .eq('sales.shop_id', selectedShopId).gte('sales.sold_at', today),
             supabase.from('batches').select('id, drug_id, batch_number, expiry_date, quantity_remaining, drugs(name)')
@@ -241,6 +248,13 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
               .eq('sales.shop_id', selectedShopId).gte('sales.sold_at', today),
             supabase.from('sales_returns').select('id, total_amount, refund_method, created_at')
               .eq('shop_id', selectedShopId).gte('created_at', today),
+            supabase.from('sale_item_discounts')
+              .select('sale_item_id, original_unit_price, discount_amount, discount_percent, discounted_by, created_at, sale_items!inner(quantity, drugs(name))')
+              .eq('shop_id', selectedShopId).gte('created_at', today).gt('discount_amount', 0)
+              .order('created_at', { ascending: false }),
+            supabase.from('staff')
+              .select('auth_user_id, full_name, role')
+              .eq('shop_id', selectedShopId),
           ]);
           for (const result of [itemsResult, batchesResult, policyResult]) {
             if (result.error) throw result.error;
@@ -248,6 +262,15 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
           if (equipmentResult.error) throw equipmentResult.error;
           if (equipmentSalesResult.error) throw equipmentSalesResult.error;
           if (returnsResult.error) throw returnsResult.error;
+          if (discountsResult.error) {
+            // The discount ledger is an optional enhancement. A database where
+            // the discount migration has not been applied yet must not break
+            // the rest of the dashboard.
+            console.warn('Discount summary unavailable:', discountsResult.error.message);
+          }
+          if (staffResult.error) {
+            console.warn('Staff lookup unavailable:', staffResult.error.message);
+          }
 
           let receivedRows = receivedResult.data || [];
           let sourceNames = {};
@@ -371,6 +394,20 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
               sellingPrice: Number(row.selling_price || 0),
             })));
             setTodayReturns(returnsResult.data || []);
+            const staffByAuthUserId = Object.fromEntries(
+              (staffResult.data || []).map((member) => [member.auth_user_id, member])
+            );
+            setTodayDiscounts((discountsResult.data || []).map((row) => {
+              const member = staffByAuthUserId[row.discounted_by];
+              return {
+                id: row.sale_item_id,
+                name: row.sale_items?.drugs?.name || 'Product',
+                quantity: Number(row.sale_items?.quantity || 1),
+                discountAmount: Number(row.discount_amount || 0),
+                staffName: member?.full_name || 'Unknown staff',
+                staffRole: member?.role || '',
+              };
+            }));
           }
         } catch (bgErr) {
           if (!cancelled) setError(bgErr.message || 'Unable to load some dashboard data.');
@@ -403,6 +440,10 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
   const expiredUnits = useMemo(() => expiredStock.reduce(
     (total, batch) => total + Number(batch.quantity_remaining || 0), 0
   ), [expiredStock]);
+  const discountTotal = useMemo(
+    () => todayDiscounts.reduce((total, row) => total + row.discountAmount * row.quantity, 0),
+    [todayDiscounts]
+  );
 
   if (loading) return <main className="dashboard"><p>Loading dashboard…</p></main>;
   if (error) return <main className="dashboard"><p className="error">{error}</p></main>;
@@ -431,6 +472,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
       <article><span>Net sales today</span><strong>{currency.format(totalRevenue)}</strong></article>
       <article><span>Returns today</span><strong>{currency.format(todayReturns.reduce((sum, row) => sum + Number(row.total_amount || 0), 0))}</strong></article>
       <article><span>Transactions</span><strong>{todaySales.length}</strong></article>
+      <article><span>Discounts given today</span><strong className={discountTotal > 0 ? 'warning' : ''}>{currency.format(discountTotal)}</strong></article>
       <article><span>Units received today</span><strong>{receivedUnits}</strong></article>
       <article><span>Expired units</span><strong className={expiredUnits > 0 ? 'critical' : ''}>{expiredUnits}</strong></article>
       <article><span>Low-stock drugs</span><strong>{lowStock.length}</strong></article>
@@ -466,6 +508,23 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
       </article>
       <article className="panel"><h2>Payment methods today</h2>
         <ul className="payment-list">{paymentSummary.map((payment) => <li key={payment.method}><span><strong>{paymentLabels[payment.method]}</strong><small>{payment.count} transaction{payment.count === 1 ? '' : 's'}</small></span><strong>{currency.format(payment.total)}</strong></li>)}</ul>
+      </article>
+      <article className="panel"><h2>Discounts given today</h2>
+        {!todayDiscounts.length ? <p className="muted">No discounts have been given today.</p> : <>
+          <div className="received-summary">
+            <span><small>Discounted lines</small><strong>{todayDiscounts.length}</strong></span>
+            <span><small>Value given</small><strong>{currency.format(discountTotal)}</strong></span>
+          </div>
+          <ul className="stock-list">{todayDiscounts.slice(0, 8).map((row) => (
+            <li key={row.id}>
+              <span>
+                <strong>{row.name}</strong>
+                <small>{row.staffName} · {roleLabel(row.staffRole)} · {currency.format(row.discountAmount)} off each</small>
+              </span>
+              <strong className="warning">−{currency.format(row.discountAmount * row.quantity)}</strong>
+            </li>
+          ))}</ul>
+        </>}
       </article>
       <article className="panel"><h2>Stock received today</h2>
         {!receivedStock.length ? <p className="muted">No stock has been received today.</p> : <><div className="received-summary"><span><small>Units received</small><strong>{receivedUnits}</strong></span><span><small>Purchase value</small><strong>{currency.format(receivedCost)}</strong></span></div><ul className="stock-list">{receivedStock.map((movement) => <li key={movement.id}><span><strong>{movement.batches?.drugs?.name || 'Stock receipt'}</strong><small>{movementLabel(movement, sourceShopNames)} · {new Date(movement.created_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}</small></span><strong>{movement.quantity} units</strong></li>)}</ul></>}

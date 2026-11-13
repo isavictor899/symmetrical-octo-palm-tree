@@ -7,11 +7,23 @@ function errorMessage(error) {
 }
 
 function isPermanentRejection(error) {
-  // Both stock RPCs use RAISE EXCEPTION for business-rule failures. Supabase
-  // exposes these consistently as PostgreSQL's P0001 code, regardless of
-  // the message text, so new server validation cannot accidentally retry
-  // forever just because its wording was not added to a client-side regex.
-  return error?.code === 'P0001';
+  // Business-rule failures raised by our RPCs. Supabase exposes these
+  // consistently as PostgreSQL's P0001 code, regardless of the message text,
+  // so new server validation cannot accidentally retry forever just because
+  // its wording was not added to a client-side regex.
+  if (error?.code === 'P0001') return true;
+
+  // Integrity / data-exception classes (23xxx, 22xxx) are deterministic:
+  // retrying the exact same payload will fail the exact same way.
+  const code = String(error?.code || '');
+  if (code.startsWith('23') || code.startsWith('22')) return true;
+
+  // PostgREST could not resolve the function or the table — usually a missing
+  // migration. That never fixes itself by retrying, so surface it instead of
+  // spinning the queue forever.
+  if (code === 'PGRST202' || code === 'PGRST205') return true;
+
+  return false;
 }
 
 function isAdminRole(value) {
@@ -220,7 +232,7 @@ async function flushAllOnce(db) {
   const { data: { session }, error } = await supabase.auth.getSession();
   if (error || !session) return;
 
-  const uploadedSales = await flushTable(db, 'pending_sales', 'sell_stock_with_discounts', (row) => ({
+  const uploadedSales = await flushTable(db, 'pending_sales', 'sell_stock_with_amount_discounts', (row) => ({
     p_shop_id: row.shop_id,
     p_payment_method: row.payment_method,
     p_items: JSON.parse(row.items_json),
@@ -228,6 +240,10 @@ async function flushAllOnce(db) {
     p_prescription_reference: row.prescription_reference || null,
     p_prescriber_name: row.prescriber_name || null,
     p_prescription_date: row.prescription_date || null,
+    // Attribute the sale to the staff member who created it on the device, and
+    // preserve the real dispensing time instead of the sync time.
+    p_created_by_user_id: row.created_by_user_id || null,
+    p_sold_at: row.created_at || null,
   }));
 
   const uploadedReceipts = await flushTable(db, 'pending_receipts', 'receive_stock', (row) => ({

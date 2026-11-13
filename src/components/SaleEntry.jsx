@@ -395,7 +395,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
         drugName: drug.name,
         batch,
         qty: 1,
-        discountPercent: 0,
+        discountAmount: 0,
         requiresPrescription: drug.requiresPrescription,
       }];
     });
@@ -430,9 +430,12 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
   }
 
   const baseLinePrice = (line) => line.kind === 'equipment' ? line.item.selling_price : line.batch.selling_price;
+  const lineDiscount = (line) => line.kind === 'equipment'
+    ? 0
+    : Math.min(Math.max(Number(line.discountAmount || 0), 0), Number(line.batch.selling_price || 0));
   const linePrice = (line) => line.kind === 'equipment'
     ? Number(line.item.selling_price)
-    : Math.round(Number(line.batch.selling_price) * (1 - Number(line.discountPercent || 0) / 100) * 100) / 100;
+    : Math.round((Number(line.batch.selling_price) - lineDiscount(line)) * 100) / 100;
   const total = cart.reduce((sum, line) => sum + line.qty * linePrice(line), 0);
 
   // Writes the sale into the LOCAL pending_sales queue — works offline.
@@ -465,7 +468,8 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
             drug_id: line.drugId,
             batch_id: line.batch.id,
             original_unit_price: baseLinePrice(line),
-            discount_percent: Number(line.discountPercent || 0),
+            // Fixed money amount off each unit, e.g. 50.00 means KES 50 off.
+            discount_amount: lineDiscount(line),
           }),
       }));
 
@@ -678,13 +682,14 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
                   {line.kind === 'equipment'
                     ? <div className="cart-meta">Medical equipment · {line.item.unit}</div>
                     : <div className="cart-meta">Batch {line.batch.batch_number || 'N/A'} · exp {line.batch.expiry_date}</div>}
-                  {line.kind === 'drug' && <label className="discount-field">Discount %
-                    <input type="number" min="0" max="100" step="0.01" value={line.discountPercent || 0} onChange={(event) => {
-                      const discountPercent = Math.max(0, Math.min(100, Number(event.target.value) || 0));
-                      setCart((current) => current.map((item) => lineKey(item) === lineKey(line) ? { ...item, discountPercent } : item));
+                  {line.kind === 'drug' && <label className="discount-field">Discount (KES per unit)
+                    <input type="number" min="0" max={Number(line.batch.selling_price || 0)} step="0.01" value={line.discountAmount || 0} onChange={(event) => {
+                      const maxDiscount = Number(line.batch.selling_price || 0);
+                      const discountAmount = Math.min(Math.max(Number(event.target.value) || 0, 0), maxDiscount);
+                      setCart((current) => current.map((item) => lineKey(item) === lineKey(line) ? { ...item, discountAmount } : item));
                     }} />
                   </label>}
-                  <div className="cart-meta">{line.discountPercent > 0 ? <><s>{formatKes(baseLinePrice(line))}</s> → </> : null}{formatKes(linePrice(line))} each</div>
+                  <div className="cart-meta">{lineDiscount(line) > 0 ? <><s>{formatKes(baseLinePrice(line))}</s> − {formatKes(lineDiscount(line))} → </> : null}{formatKes(linePrice(line))} each</div>
                 </div>
                 <div className="cart-controls">
                   <button type="button" onClick={() => updateQty(lineKey(line), -1)}>-</button>
