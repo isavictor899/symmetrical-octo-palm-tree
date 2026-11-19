@@ -11,7 +11,9 @@ function formatKes(n) {
 
 function printSaleReceipt(receipt, shopName) {
   const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
-  const popup = window.open('', '_blank', 'noopener,noreferrer,width=680,height=800');
+  // Do not pass `noopener`: browsers return null for that option, which made
+  // the print button silently exit before writing the receipt.
+  const popup = window.open('', '_blank', 'width=680,height=800');
   if (!popup) return;
   const unitPrice = (line) => line.kind === 'equipment'
     ? Number(line.item?.selling_price || 0)
@@ -20,7 +22,12 @@ function printSaleReceipt(receipt, shopName) {
   popup.document.write(`<!doctype html><html><head><title>Sales receipt</title><style>body{font:14px Arial,sans-serif;color:#18211d;margin:32px}h1{margin:0 0 4px;font-size:22px}p{margin:4px 0;color:#53605a}table{width:100%;border-collapse:collapse;margin-top:22px}th,td{padding:10px 4px;border-bottom:1px solid #dfe4df;text-align:left}th:not(:first-child),td:not(:first-child){text-align:right}.total{margin-top:20px;font-size:17px;font-weight:700}@media print{body{margin:18px}}</style></head><body><h1>Sales receipt</h1><p><b>${escapeHtml(shopName || 'Pharmacy POS')}</b></p><p>${new Date(receipt.time).toLocaleString('en-KE')} · ${escapeHtml(receipt.paymentMethod)}</p><table><thead><tr><th>Item</th><th>Qty</th><th>Unit price</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table><p class="total">Total: ${formatKes(receipt.total)}</p></body></html>`);
   popup.document.close();
   popup.focus();
-  popup.print();
+  let didPrint = false;
+  const printOnce = () => { if (!didPrint && !popup.closed) { didPrint = true; popup.print(); } };
+  popup.onload = printOnce;
+  // about:blank is already loaded in some browsers before its load handler is
+  // assigned, so schedule printing after the document has been written too.
+  window.setTimeout(printOnce, 250);
 }
 
 // First-Expiry-First-Out: among in-stock, non-expired batches, pick the

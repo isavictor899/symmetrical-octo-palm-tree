@@ -8,12 +8,18 @@ import './PurchaseOrders.css';
 const kes = new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 2 });
 
 function printGrn(receipt) {
-  const popup = window.open('', '_blank', 'noopener,noreferrer,width=720,height=800');
+  // `noopener` makes window.open return null in major browsers, so the old
+  // handler exited before putting any GRN content in the print window.
+  const popup = window.open('', '_blank', 'width=720,height=800');
   if (!popup) return false;
-  popup.document.write(`<!doctype html><html><head><title>GRN ${receipt.number}</title><style>body{font:14px Arial,sans-serif;color:#18211d;margin:32px}h1{margin:0 0 4px;font-size:22px}p{margin:4px 0;color:#53605a}table{width:100%;border-collapse:collapse;margin-top:22px}th,td{padding:10px 4px;border-bottom:1px solid #dfe4df;text-align:left}th:last-child,td:last-child{text-align:right}.total{margin-top:20px;font-weight:700}@media print{body{margin:18px}}</style></head><body><h1>Goods Received Note</h1><p>${receipt.number} · ${receipt.date}</p><p><b>Receiving shop:</b> ${receipt.shop}</p><p><b>Supplier:</b> ${receipt.supplier}</p><table><thead><tr><th>Drug</th><th>Batch</th><th>Expiry</th><th>Quantity</th><th>Unit cost</th></tr></thead><tbody><tr><td>${receipt.drug}</td><td>${receipt.batch || '—'}</td><td>${receipt.expiry}</td><td>${receipt.quantity}</td><td>${kes.format(receipt.cost)}</td></tr></tbody></table><p class="total">Received value: ${kes.format(receipt.quantity * receipt.cost)}</p></body></html>`);
+  const escapeHtml = (value) => String(value ?? '').replace(/[&<>\'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
+  popup.document.write(`<!doctype html><html><head><title>GRN ${escapeHtml(receipt.number)}</title><style>body{font:14px Arial,sans-serif;color:#18211d;margin:32px}h1{margin:0 0 4px;font-size:22px}p{margin:4px 0;color:#53605a}table{width:100%;border-collapse:collapse;margin-top:22px}th,td{padding:10px 4px;border-bottom:1px solid #dfe4df;text-align:left}th:last-child,td:last-child{text-align:right}.total{margin-top:20px;font-weight:700}@media print{body{margin:18px}}</style></head><body><h1>Goods Received Note</h1><p>${escapeHtml(receipt.number)} · ${escapeHtml(receipt.date)}</p><p><b>Receiving shop:</b> ${escapeHtml(receipt.shop)}</p><p><b>Supplier:</b> ${escapeHtml(receipt.supplier)}</p><table><thead><tr><th>Drug</th><th>Batch</th><th>Expiry</th><th>Quantity</th><th>Unit cost</th></tr></thead><tbody><tr><td>${escapeHtml(receipt.drug)}</td><td>${escapeHtml(receipt.batch || '—')}</td><td>${escapeHtml(receipt.expiry)}</td><td>${Number(receipt.quantity)}</td><td>${kes.format(Number(receipt.cost))}</td></tr></tbody></table><p class="total">Received value: ${kes.format(Number(receipt.quantity) * Number(receipt.cost))}</p></body></html>`);
   popup.document.close();
   popup.focus();
-  popup.print();
+  let didPrint = false;
+  const printOnce = () => { if (!didPrint && !popup.closed) { didPrint = true; popup.print(); } };
+  popup.onload = printOnce;
+  window.setTimeout(printOnce, 250);
   return true;
 }
 
