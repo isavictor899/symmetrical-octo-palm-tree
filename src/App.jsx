@@ -13,6 +13,7 @@ import './App.css';
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const SaleEntry = lazy(() => import('./components/SaleEntry'));
 const ReceiveStock = lazy(() => import('./components/ReceiveStock'));
+const PurchaseOrders = lazy(() => import('./components/PurchaseOrders'));
 const StockedDrugs = lazy(() => import('./components/StockedDrugs'));
 const MonthlyReport = lazy(() => import('./components/MonthlyReport'));
 const Settings = lazy(() => import('./components/Settings'));
@@ -39,6 +40,8 @@ function NavIcon({ name }) {
       return <svg {...common} strokeWidth={1.6}><rect x="6.5" y="4.5" width="11" height="15" rx="1.5" /><rect x="8.5" y="6.5" width="7" height="5" /><path d="M8.5 17.5H9.5" /><path d="M14.5 17.5H15.5" /><path d="M11.5 17.5H12.5" /><path d="M8.5 15.5H9.5" /><path d="M14.5 15.5H15.5" /><path d="M11.5 15.5H12.5" /><path d="M8.5 13.5H9.5" /><path d="M14.5 13.5H15.5" /><path d="M11.5 13.5H12.5" /></svg>;
     case 'receive':
       return <svg {...common}><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 19h14" /><path d="M7 19v-3" /><path d="M17 19v-3" /></svg>;
+    case 'purchaseOrders':
+      return <svg {...common}><path d="M6 3h9l3 3v15H6z" /><path d="M15 3v4h4" /><path d="M9 11h6" /><path d="M9 15h6" /></svg>;
     case 'stockedDrugs':
       return <svg width="18" height="18" viewBox="0 0 512 512" fill="currentColor" aria-hidden="true" focusable="false"><path d="M403.5 163.765 330.137 90.353h25.958c5.544 0 10.336-4.102 10.336-9.646V10.432C366.431 4.889 361.64 0 356.096 0H155.311c-5.544 0-9.743 4.889-9.743 10.432v70.275c0 5.544 4.199 9.646 9.743 9.646h25.958l-73.066 73.412c-1.882 1.882-2.792 4.632-2.792 7.295v331.294c0 5.544 4.199 9.646 9.743 9.646h281.098c5.544 0 10.336-4.102 10.336-9.646V171.06c0-2.663-1.206-5.413-3.088-7.295zM165.647 70.275V20.078h180.706v50.196H165.647zM386.51 371.451H245.961V250.98H386.51v120.471zm0-140.549H235.625c-5.544 0-9.743 4.889-9.743 10.432v140.549c0 5.544 4.199 9.646 9.743 9.646H386.51v100.392H125.49V175.218l84.175-84.865h92.076l84.768 84.865v55.684z" /><path d="M326.275 301.176v-30.117h-20.079v30.117h-30.118v20.079h30.118v30.118h20.079v-30.118h30.117v-20.079z" /></svg>;
     case 'monthlyReport':
@@ -77,6 +80,7 @@ const pages = {
   dashboard: { label: 'Dashboard', icon: 'dashboard', component: Dashboard },
   sale: { label: 'New sale', icon: 'sale', component: SaleEntry },
   receive: { label: 'Receive stock', icon: 'receive', component: ReceiveStock },
+  purchaseOrders: { label: 'Purchase orders', icon: 'purchaseOrders', component: PurchaseOrders },
   stockedDrugs: { label: 'Stocked drugs', icon: 'stockedDrugs', component: StockedDrugs },
   monthlyReport: { label: 'Monthly report', icon: 'monthlyReport', component: MonthlyReport },
   settings: { label: 'Settings', icon: 'settings', component: Settings },
@@ -235,7 +239,7 @@ export default function App() {
 
   const availablePages = Object.entries(pages).filter(([key]) => {
     if ((key === 'dashboard' || key === 'monthlyReport' || key === 'settings') && !isAdminRole(staffRole)) return false;
-    if (key === 'receive' && !canReceiveStock(staffRole)) return false;
+    if ((key === 'receive' || key === 'purchaseOrders') && !canReceiveStock(staffRole)) return false;
     if (key === 'stockedDrugs' && !canManageStockedDrugs(staffRole)) return false;
     return true;
   });

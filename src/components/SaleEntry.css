@@ -369,6 +369,7 @@
 
 .inline-error { color: var(--danger); background: var(--danger-bg); }
 .inline-success { color: var(--success); background: var(--success-bg); }
+.receipt-print { margin-left: 8px; padding: 3px 6px; border: 1px solid currentColor; border-radius: 5px; color: inherit; background: transparent; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
 
 /* Desktop: a true till — only the lists scroll, the total stays put. */
 @media (min-width: 981px) {
