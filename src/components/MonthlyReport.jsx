@@ -159,7 +159,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
             .gte('sold_at', startIso)
             .lt('sold_at', endIso),
           supabase.from('sale_items')
-            .select('drug_id, quantity, unit_price, drugs(name, generic_name), sales!inner(shop_id, sold_at)')
+            .select('drug_id, batch_id, quantity, unit_price, drugs(name, generic_name), sales!inner(shop_id, sold_at)')
             .in('sales.shop_id', shopIds)
             .gte('sales.sold_at', startIso)
             .lt('sales.sold_at', endIso),
@@ -171,13 +171,13 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
             .lt('created_at', endIso)
             .order('created_at', { ascending: false }),
           supabase.from('batches')
-            .select('id, shop_id, drug_id, quantity_remaining, selling_price, expiry_date, drugs(name, generic_name)')
+            .select('id, shop_id, drug_id, quantity_remaining, cost_price, selling_price, expiry_date, drugs(name, generic_name)')
             .in('shop_id', shopIds),
           supabase.from('equipment_sale_items')
             .select('equipment_supply_id, quantity, unit_price, equipment_supplies(name, unit), sales!inner(shop_id, sold_at)')
             .in('sales.shop_id', shopIds).gte('sales.sold_at', startIso).lt('sales.sold_at', endIso),
           supabase.from('shop_equipment_stock')
-            .select('shop_id, equipment_supply_id, quantity_on_hand, selling_price, equipment_supplies(name, unit)')
+            .select('shop_id, equipment_supply_id, quantity_on_hand, average_cost, selling_price, equipment_supplies(name, unit)')
             .in('shop_id', shopIds),
           supabase.from('sales_returns')
             .select('shop_id, refund_method, total_amount, created_at')
@@ -305,7 +305,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
       const id = item.equipment_supply_id;
       const row = grouped.get(id) || { id, name: item.equipment_supplies?.name || 'Equipment', generic: item.equipment_supplies?.unit || '', quantity: 0, amount: 0 };
       row.quantity += Number(item.quantity_on_hand || 0);
-      row.amount += Number(item.quantity_on_hand || 0) * Number(item.selling_price || 0);
+      row.amount += Number(item.quantity_on_hand || 0) * Number(item.average_cost || 0);
       grouped.set(id, row);
       return grouped;
     }, new Map());
@@ -321,7 +321,31 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
     const inventoryDrugs = groupDrugs(
       currentInventory,
       (row) => row.quantity_remaining,
-      (row) => Number(row.quantity_remaining || 0) * Number(row.selling_price || 0)
+      (row) => Number(row.quantity_remaining || 0) * Number(row.cost_price || 0)
+    );
+
+    const batchCosts = new Map(currentInventory.map((batch) => [batch.id, batch.cost_price]));
+    let drugSalesValue = 0;
+    let drugCostOfGoods = 0;
+    let drugCostDataComplete = true;
+    for (const item of saleItems) {
+      const quantity = Number(item.quantity || 0);
+      drugSalesValue += quantity * Number(item.unit_price || 0);
+      const cost = batchCosts.get(item.batch_id);
+      if (cost === null || cost === undefined || !Number.isFinite(Number(cost))) {
+        drugCostDataComplete = false;
+      } else {
+        drugCostOfGoods += quantity * Number(cost);
+      }
+    }
+    const drugGrossProfit = drugCostDataComplete ? drugSalesValue - drugCostOfGoods : null;
+    const drugGrossMargin = drugCostDataComplete && drugSalesValue > 0
+      ? (drugGrossProfit / drugSalesValue) * 100
+      : null;
+    const stockValueAtCost = currentInventory.reduce(
+      (sum, batch) => sum + Number(batch.quantity_remaining || 0) * Number(batch.cost_price || 0), 0
+    ) + equipmentInventory.reduce(
+      (sum, row) => sum + Number(row.quantity_on_hand || 0) * Number(row.average_cost || 0), 0
     );
 
     const paymentSummary = sales.reduce((acc, sale) => {
@@ -341,6 +365,10 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
       shopRows: [...shopMap.values()],
       totalSales: sales.reduce((total, sale) => total + Number(sale.total_amount || 0), 0)
         - salesReturns.reduce((total, refund) => total + Number(refund.total_amount || 0), 0),
+      drugGrossProfit,
+      drugGrossMargin,
+      drugCostDataComplete,
+      stockValueAtCost,
       returnsAmount: salesReturns.reduce((total, refund) => total + Number(refund.total_amount || 0), 0),
       transactions: sales.length,
       unitsSold: saleItems.reduce((total, item) => total + Number(item.quantity || 0), 0)
@@ -546,6 +574,9 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
         <article><span>Units sold</span><strong>{units(report.unitsSold)}</strong></article>
         <article><span>Units received</span><strong>{units(report.receivedUnits)}</strong></article>
         <article><span>Transferred out</span><strong>{units(report.transferredOutUnits)}</strong></article>
+        <article><span>Drug gross profit</span><strong>{report.drugGrossProfit === null ? 'Cost data incomplete' : currency.format(report.drugGrossProfit)}</strong><small>Before refunds</small></article>
+        <article><span>Drug gross margin</span><strong>{report.drugGrossMargin === null ? '—' : `${report.drugGrossMargin.toFixed(1)}%`}</strong><small>Before refunds</small></article>
+        <article><span>Stock value at cost</span><strong>{currency.format(report.stockValueAtCost)}</strong><small>Drugs and equipment</small></article>
       </section>
 
       <section className="report-grid">
@@ -575,8 +606,8 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
         <DrugPanel title="Least-selling drugs" rows={report.leastSelling} empty="No sold drugs to compare yet." showAmount />
         <DrugPanel title="Medical equipment sold" rows={report.soldEquipment} empty="No equipment sales were recorded this month." showAmount />
         <DrugPanel title="Drugs bought / received" rows={report.receivedDrugs} empty="No supplier stock receipts this month." showAmount />
-        <DrugPanel title="Current organization stock" rows={report.inventoryDrugs} empty="No current stock found." showAmount amountLabel="Stock value" />
-        <DrugPanel title="Current equipment stock" rows={report.currentEquipment} empty="No current equipment stock found." showAmount amountLabel="Stock value" />
+        <DrugPanel title="Current organization stock at cost" rows={report.inventoryDrugs} empty="No current stock found." showAmount amountLabel="Cost value" />
+        <DrugPanel title="Current equipment stock at cost" rows={report.currentEquipment} empty="No current equipment stock found." showAmount amountLabel="Cost value" />
 
         <article className="report-panel wide">
           <h2>Transfers between shops</h2>

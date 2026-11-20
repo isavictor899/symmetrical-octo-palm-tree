@@ -277,7 +277,7 @@ export default function App() {
           <aside className="app-sidebar">
             <div className="brand"><span className="brand-mark">+</span><span>Pharmacy<br /><strong>POS</strong></span></div>
             <nav className="app-nav" aria-label="Main navigation">
-              {availablePages.map(([key, item]) => <button key={key} className={page === key ? 'active' : ''} onClick={() => navigateToPage(key)}>
+              {availablePages.map(([key, item]) => <button key={key} className={page === key ? 'active' : ''} aria-current={page === key ? 'page' : undefined} onClick={() => navigateToPage(key)}>
                 <span className="nav-icon"><NavIcon name={item.icon} /></span>{item.label}
               </button>)}
             </nav>
@@ -303,7 +303,7 @@ export default function App() {
             ) : null}
           </main>
           <nav className="mobile-nav" aria-label="Main navigation">
-            {availablePages.map(([key, item]) => <button key={key} className={page === key ? 'active' : ''} onClick={() => navigateToPage(key)}><span className="nav-icon"><NavIcon name={item.icon} /></span>{item.label}</button>)}
+            {availablePages.map(([key, item]) => <button key={key} className={page === key ? 'active' : ''} aria-current={page === key ? 'page' : undefined} onClick={() => navigateToPage(key)}><span className="nav-icon"><NavIcon name={item.icon} /></span>{item.label}</button>)}
           </nav>
         </div>
       )}

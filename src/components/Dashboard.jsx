@@ -67,17 +67,6 @@ function stockStatusClass(quantity) {
   return 'warning';
 }
 
-function formatInsightMessage(message) {
-  if (!message) return '';
-
-  return message
-    .replace(/low at -([\d.]+) units/gi, (_match, shortage) => `short by ${roundedUnits(shortage)} units`)
-    .replace(/low at ([\d.]+) units/gi, (_match, units) => `low at ${roundedUnits(units)} units`)
-    .replace(/\(([\d.]+)\/day average, reorder point ([\d.]+) units\)/gi, (_match, average, reorderPoint) =>
-      `(about ${roundedUnits(average)} unit${roundedUnits(average) === 1 ? '' : 's'}/day, reorder at ${roundedUnits(reorderPoint)} units)`
-    );
-}
-
 function startOfToday() {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
@@ -425,7 +414,10 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
   }), [todaySales, todayReturns]);
   const receivedUnits = useMemo(() => receivedStock.reduce((total, movement) => total + Number(movement.quantity), 0), [receivedStock]);
   const receivedCost = useMemo(() => receivedStock.reduce(
-    (total, movement) => total + Number(movement.quantity) * Number(movement.batches?.cost_price || 0), 0
+    (total, movement) => movement.movement_type === 'received'
+      ? total + Number(movement.quantity) * Number(movement.batches?.cost_price || 0)
+      : total,
+    0
   ), [receivedStock]);
   const expiredUnits = useMemo(() => expiredStock.reduce(
     (total, batch) => total + Number(batch.quantity_remaining || 0), 0

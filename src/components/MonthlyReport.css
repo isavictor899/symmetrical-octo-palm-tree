@@ -43,7 +43,7 @@
 
 .report-metrics {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -182,4 +182,8 @@
   .report-metrics { grid-template-columns: 1fr 1fr; gap: 8px; }
   .report-metrics article { padding: 12px; }
   .report-metrics strong { font-size: 17px; overflow-wrap: anywhere; }
+}
+
+@media (max-width: 380px) {
+  .monthly-report .report-metrics { grid-template-columns: 1fr; }
 }

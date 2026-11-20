@@ -259,3 +259,7 @@
   .metrics strong { font-size: 18px; overflow-wrap: anywhere; }
 }
 
+@media (max-width: 380px) {
+  .dashboard .metrics { grid-template-columns: 1fr; }
+}
+

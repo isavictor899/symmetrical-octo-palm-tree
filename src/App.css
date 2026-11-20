@@ -39,6 +39,12 @@
 
   --radius: 8px;
   --radius-sm: 6px;
+  --radius-panel: 10px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
 
   /* Shadows only exist on things that float. */
   --shadow-sm: none;
@@ -379,14 +385,29 @@ textarea { resize: vertical; }
   .mobile-header strong { font-size: 15px; font-weight: 800; }
   .mobile-header button { margin-left: auto; padding: 6px 0; border: 0; color: var(--brand-primary); background: transparent; font-size: 13px; font-weight: 700; }
 
-  .mobile-nav { position: fixed; z-index: 5; right: 0; bottom: 0; left: 0; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 6px 4px max(8px, env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: rgba(255, 255, 255, 0.96); backdrop-filter: blur(8px); }
-  .mobile-nav button { display: grid; justify-items: center; gap: 2px; min-width: 0; padding: 4px 2px; border: 0; border-radius: var(--radius); color: var(--text-muted); background: transparent; font-size: 11px; font-weight: 600; cursor: pointer; }
+  .mobile-nav { position: fixed; z-index: 5; right: 0; bottom: 0; left: 0; display: flex; gap: 4px; overflow-x: auto; overscroll-behavior-x: contain; padding: 6px 8px max(8px, env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: rgba(255, 255, 255, 0.98); scrollbar-width: thin; }
+  .mobile-nav button { display: grid; flex: 1 0 68px; justify-items: center; align-content: center; gap: 2px; min-width: 68px; min-height: 48px; padding: 4px 3px; border: 0; border-radius: var(--radius); color: var(--text-muted); background: transparent; font-size: 11px; font-weight: 600; cursor: pointer; }
   .mobile-nav .nav-icon { width: 20px; height: 20px; }
   .mobile-nav .nav-icon svg, .mobile-nav .nav-icon img { width: 20px; height: 20px; }
   .mobile-nav button.active { color: var(--brand-primary); background: var(--brand-tint); font-weight: 800; }
 
   .page-panel, .settings-page { padding: 18px 14px; }
   .notice { margin: 10px 12px 0; }
+}
+
+/* Shared data presentation: align financial and quantity columns consistently. */
+.metrics article,
+.report-metrics article,
+.panel,
+.report-panel { border-radius: var(--radius-panel); }
+
+.metrics strong,
+.report-metrics strong,
+.table-wrap td,
+.report-list > li > strong { font-variant-numeric: tabular-nums; }
+
+@media (max-width: 380px) {
+  .mobile-nav button { flex-basis: 64px; min-width: 64px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
