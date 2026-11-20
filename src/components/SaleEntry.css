@@ -3,7 +3,7 @@
   display: grid;
   place-items: center;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .pos-sale {
@@ -26,14 +26,14 @@
 
 .pos-header h1 {
   margin: 2px 0 0;
-  font-size: 20px;
+  font-size: 1.25rem;
   line-height: 1.2;
 }
 
 .pos-header p {
   margin: 2px 0 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .pos-header .pos-status-row { margin: 0; }
@@ -65,7 +65,7 @@
   height: 46px;
   margin-bottom: 12px;
   padding: 0 14px 0 40px;
-  font-size: 15px;
+  font-size: 0.9375rem;
   background:
     var(--surface)
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%235f6762' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E")
@@ -105,7 +105,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  font-size: 14.5px;
+  font-size: 0.9063rem;
   font-weight: 700;
 }
 
@@ -113,7 +113,7 @@
 .cart-meta {
   margin-top: 2px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .discount-field {
@@ -122,13 +122,13 @@
   gap: 7px;
   margin-top: 7px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
 }
 .discount-field input { width: 78px; height: 30px; padding: 4px 7px; }
 
-.return-workspace h2 { margin: 0 0 4px; font-size: 18px; }
-.return-workspace > .muted { margin: 0 0 14px; font-size: 13px; }
+.return-workspace h2 { margin: 0 0 4px; font-size: 1.125rem; }
+.return-workspace > .muted { margin: 0 0 14px; font-size: 0.8125rem; }
 .return-form {
   display: grid;
   gap: 12px;
@@ -138,18 +138,18 @@
   border-radius: 12px;
   background: var(--surface);
 }
-.return-form h3 { margin: 0; font-size: 15px; }
-.return-form label { display: grid; gap: 5px; color: var(--text-muted); font-size: 12px; font-weight: 700; }
+.return-form h3 { margin: 0; font-size: 0.9375rem; }
+.return-form label { display: grid; gap: 5px; color: var(--text-muted); font-size: 0.75rem; font-weight: 700; }
 .return-form input, .return-form select { min-height: 38px; padding: 7px 10px; }
-.return-form > strong { font-size: 15px; }
+.return-form > strong { font-size: 0.9375rem; }
 .product-row.selected { border-color: var(--brand-primary); background: var(--brand-tint); }
 .return-summary { gap: 10px; }
 .return-summary .total-row { margin: 5px 0; }
-.return-summary .total-row span:last-child { font-size: 16px; }
+.return-summary .total-row span:last-child { font-size: 1rem; }
 
 .product-price {
   flex: 0 0 auto;
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
@@ -157,7 +157,7 @@
 .mini-badge {
   height: 20px;
   padding: 0 8px;
-  font-size: 10px;
+  font-size: 0.625rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -166,7 +166,7 @@
 .mini-badge.danger { color: var(--warning); background: var(--warning-bg); }
 .mini-badge.price-tier { color: var(--brand-primary); background: var(--brand-tint); }
 .product-price { display: grid; justify-items: end; gap: 2px; }
-.product-price small { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; }
+.product-price small { font-size: 0.625rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; }
 
 /* ── Cart / checkout ─────────────────────────────────────────── */
 .checkout-pane {
@@ -183,7 +183,7 @@
 .cart-heading {
   margin-bottom: 4px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -204,7 +204,7 @@
 }
 
 .cart-drug {
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 700;
 }
 
@@ -230,14 +230,14 @@
 .cart-controls span {
   min-width: 26px;
   text-align: center;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
 .cart-controls strong {
   margin-left: auto;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -249,7 +249,7 @@
   border: 0;
   color: var(--danger);
   background: transparent;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
 }
 
@@ -267,13 +267,13 @@
   align-items: baseline;
   margin-bottom: 12px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
 }
 
 .total-row span:last-child {
   color: var(--text);
-  font-size: 24px;
+  font-size: 1.5rem;
   font-weight: 800;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
@@ -294,7 +294,7 @@
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   text-transform: capitalize;
   cursor: pointer;
@@ -322,19 +322,19 @@
 .rx-fieldset legend {
   padding: 0;
   color: var(--warning);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 800;
 }
 
 .rx-fieldset p {
   margin: 0;
   color: var(--warning);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .rx-fieldset input {
   min-height: 36px;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .complete-sale {
@@ -344,7 +344,7 @@
   border-radius: var(--radius);
   background: var(--brand-primary);
   color: var(--brand-primary-contrast);
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 800;
   cursor: pointer;
   transition: background-color 0.12s ease;
@@ -364,13 +364,13 @@
   margin-top: 10px;
   padding: 9px 11px;
   border-radius: var(--radius);
-  font-size: 12.5px;
+  font-size: 0.7813rem;
 }
 
 .inline-error { color: var(--danger); background: var(--danger-bg); }
 .inline-success { color: var(--success); background: var(--success-bg); }
-.receipt-print { margin-left: 8px; padding: 3px 6px; border: 1px solid currentColor; border-radius: 5px; color: inherit; background: transparent; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
-.cancel-current-sale { width: 100%; min-height: 36px; margin-top: 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text); background: var(--surface); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.receipt-print { margin-left: 8px; padding: 3px 6px; border: 1px solid currentColor; border-radius: 5px; color: inherit; background: transparent; font: inherit; font-size: 0.6875rem; font-weight: 700; cursor: pointer; }
+.cancel-current-sale { width: 100%; min-height: 36px; margin-top: 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text); background: var(--surface); font: inherit; font-size: 0.75rem; font-weight: 700; cursor: pointer; }
 .cancel-current-sale:hover { color: var(--danger); border-color: var(--danger); background: var(--danger-bg); }
 .notice-row-actions { display: inline-flex; flex: 0 0 auto; gap: 6px; }
 .notice-row .notice-cancel { color: var(--danger); }

@@ -23,6 +23,7 @@ import { flushAll } from './lib/powersync/flush';
 import { ensureLocalStaff } from './lib/staff';
 import { canManageStockedDrugs, canReceiveStock, isAdminRole } from './lib/roles';
 import { defaultBrandColor, applyBrandTheme, applyCachedThemeIfAny, cacheTheme } from './lib/theme';
+import { applyFontScale, loadFontScale } from './lib/fontScale';
 import Login from './components/Login';
 import PageErrorBoundary from './components/PageErrorBoundary';
 import NotificationBell from './components/NotificationBell';
@@ -124,6 +125,10 @@ export default function App() {
   useEffect(() => {
     applyCachedThemeIfAny();
   }, []);
+
+  useEffect(() => {
+    applyFontScale(loadFontScale(session?.user?.id));
+  }, [session?.user?.id]);
 
   useEffect(() => {
     if (!session) {
@@ -259,7 +264,7 @@ export default function App() {
   }, [activeShopId, organizationShops]);
 
   const availablePages = Object.entries(pages).filter(([key]) => {
-    if ((key === 'dashboard' || key === 'monthlyReport' || key === 'settings' || key === 'financeExpenses' || key === 'financeIncome' || key === 'financeTransactions' || key.endsWith('Report') || key === 'profitLoss') && !isAdminRole(staffRole)) return false;
+    if ((key === 'dashboard' || key === 'monthlyReport' || key === 'financeExpenses' || key === 'financeIncome' || key === 'financeTransactions' || key.endsWith('Report') || key === 'profitLoss') && !isAdminRole(staffRole)) return false;
     if ((key === 'receive' || key === 'purchaseOrders') && !canReceiveStock(staffRole)) return false;
     if (key === 'stockedDrugs' && !canManageStockedDrugs(staffRole)) return false;
     return true;
@@ -419,6 +424,7 @@ export default function App() {
                 <Suspense fallback={<div className="app-page-loading">Loading page…</div>}>
                   <ActivePageComponent
                     {...(activePageEntry?.[1]?.props || {})}
+                    {...(page === 'settings' ? { userId: session.user.id } : {})}
                     initialSearch={page === 'sale' ? saleSearchTerm : ''}
                     onNavigatePage={navigateToPage}
                     activeShopId={activeShopId}
