@@ -262,6 +262,7 @@ async function flushAllOnce(db) {
       || row.initial_requires_prescription === ''
       ? null
       : Number(row.initial_requires_prescription) === 1,
+    p_paid_now: Number(row.paid_now || 0) === 1,
   }));
 
   const uploadedCount = uploadedSales + uploadedReceipts;

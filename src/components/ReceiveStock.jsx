@@ -8,7 +8,7 @@ import './ReceiveStock.css';
 
 const initialForm = {
   drugId: '', supplierId: '', newSupplierName: '', batchNumber: '', expiryDate: '',
-  costPrice: '', sellingPrice: '', quantity: '', initialRequiresPrescription: '',
+  costPrice: '', sellingPrice: '', quantity: '', initialRequiresPrescription: '', paidNow: false,
 };
 
 export default function ReceiveStock({ activeShopId, activeShopName, isActive = true }) {
@@ -173,8 +173,8 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
       if (sessionError || !session) throw new Error('Your sign-in session is unavailable. Sign in again before receiving stock.');
       await db.execute(
         `INSERT INTO pending_receipts
-           (id, created_by_user_id, shop_id, drug_id, supplier_id, supplier_name, batch_number, expiry_date, cost_price, selling_price, quantity, initial_requires_prescription, created_at, status, last_error)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, created_by_user_id, shop_id, drug_id, supplier_id, supplier_name, batch_number, expiry_date, cost_price, selling_price, quantity, paid_now, initial_requires_prescription, created_at, status, last_error)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           localId,
           session.user.id,
@@ -187,6 +187,7 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
           Number(form.costPrice),
           Number(form.sellingPrice),
           Number(form.quantity),
+          form.paidNow ? 1 : 0,
           needsInitialClassification
             ? (form.initialRequiresPrescription === 'pom' ? 1 : 0)
             : queuedClassification?.initial_requires_prescription ?? null,
@@ -481,6 +482,7 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
       <label>Cost price (KES)<input required min="0" step="0.01" type="number" value={form.costPrice} onChange={(event) => update('costPrice', event.target.value)} /></label>
       <label>Selling price (KES)<input required min="0" step="0.01" type="number" value={form.sellingPrice} onChange={(event) => update('sellingPrice', event.target.value)} /></label>
       <label>Quantity received<input required min="1" step="1" type="number" value={form.quantity} onChange={(event) => update('quantity', event.target.value)} /></label>
+      <label className="receipt-payment-choice"><input type="checkbox" checked={form.paidNow} onChange={(event) => update('paidNow', event.target.checked)} /> Supplier was paid now <small>Records the cost as a stock-purchase expense after this receipt syncs.</small></label>
       <button disabled={saving}>{saving ? 'Recording stock…' : 'Receive stock'}</button>
       {error && <p className="error">{error}</p>}{message && <p className="success">{message}</p>}
     </form> : <form onSubmit={submitEquipment}>

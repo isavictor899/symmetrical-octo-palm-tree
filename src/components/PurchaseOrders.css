@@ -8,3 +8,5 @@
 .po-classification-note{grid-column:1/-1;padding:10px 12px;border-radius:var(--radius);background:var(--surface-subtle)}
 .po-classification-note strong{color:var(--text)}
 .po-receive-error{grid-column:1/-1;margin:0;padding:9px 11px;border-radius:var(--radius);background:var(--danger-bg);color:var(--danger);font-size:12px}
+.po-receive-dialog .po-paid-now{grid-column:1/-1;display:grid;grid-template-columns:16px 1fr;align-items:start;gap:8px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-subtle);color:var(--text);cursor:pointer}
+.po-receive-dialog .po-paid-now small{grid-column:2;color:var(--text-muted);font-weight:500}

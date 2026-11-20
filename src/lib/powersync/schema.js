@@ -78,6 +78,8 @@ const pending_receipts = new Table({
   cost_price: column.real,
   selling_price: column.real,
   quantity: column.integer,
+  // 1 = the supplier was paid at receipt time, 0 = payable remains unpaid.
+  paid_now: column.integer,
   // 1 = POM, 0 = OTC, null = existing stocked drug / no first-stock choice.
   initial_requires_prescription: column.integer,
   created_at: column.text,
