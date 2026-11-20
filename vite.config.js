@@ -48,6 +48,18 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    // Vite 8 uses Rolldown/Oxc. Drop console calls from shipped production
+    // chunks so diagnostic arguments (including transaction identifiers)
+    // cannot leak through the browser console.
+    rolldownOptions: {
+      output: {
+        minify: {
+          compress: { dropConsole: true },
+        },
+      },
+    },
+  },
   worker: {
     format: 'es',
   },

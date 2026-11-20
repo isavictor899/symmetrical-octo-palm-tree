@@ -175,16 +175,18 @@ async function flushTable(db, table, rpcName, mapArgs) {
       const saleSummary = table === 'pending_sales' ? normalizeSaleItems(row.items_json) : null;
       if (saleSummary) {
         const duplicateBatches = saleSummary.duplicates.length;
-        console.info('[PowerSync] finalizing sale payload', {
-          rowId: row.id,
-          shopId: row.shop_id,
-          totalAmount: Number(row.total_amount || 0),
-          totalQuantity: saleSummary.totalQuantity,
-          batchAllocations: saleSummary.byBatch,
-          duplicateBatchIds: saleSummary.duplicates,
-          duplicateBatchCount: duplicateBatches,
-        });
-        if (duplicateBatches > 0) {
+        if (import.meta.env.DEV) {
+          console.info('[PowerSync] finalizing sale payload', {
+            rowId: row.id,
+            shopId: row.shop_id,
+            totalAmount: Number(row.total_amount || 0),
+            totalQuantity: saleSummary.totalQuantity,
+            batchAllocations: saleSummary.byBatch,
+            duplicateBatchIds: saleSummary.duplicates,
+            duplicateBatchCount: duplicateBatches,
+          });
+        }
+        if (duplicateBatches > 0 && import.meta.env.DEV) {
           console.warn('[PowerSync] duplicate batch allocation detected before sell_stock RPC', {
             rowId: row.id,
             duplicateBatchIds: saleSummary.duplicates,
@@ -194,7 +196,7 @@ async function flushTable(db, table, rpcName, mapArgs) {
 
       const { error } = await supabase.rpc(rpcName, finalizationArgs);
       if (error) throw error;
-      if (saleSummary) {
+      if (saleSummary && import.meta.env.DEV) {
         console.info('[PowerSync] sale RPC succeeded', {
           rowId: row.id,
           totalQuantity: saleSummary.totalQuantity,

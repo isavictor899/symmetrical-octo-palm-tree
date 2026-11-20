@@ -107,6 +107,8 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [page, setPage] = useState('sale');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [expandedNavGroups, setExpandedNavGroups] = useState(() => new Set(['Sales']));
   const [_visitedPages, setVisitedPages] = useState(() => new Set(['sale']));
   const [staffRole, setStaffRole] = useState(null);
   const [organizationShops, setOrganizationShops] = useState([]);
@@ -261,6 +263,7 @@ export default function App() {
 
   function navigateToPage(nextPage) {
     setPage(nextPage);
+    setMobileMenuOpen(false);
     setVisitedPages((previous) => previous.has(nextPage)
       ? previous
       : new Set([...previous, nextPage]));
@@ -275,6 +278,34 @@ export default function App() {
     groups[group].push([key, item]);
     return groups;
   }, {});
+
+  useEffect(() => {
+    const activeGroup = pages[page]?.group;
+    if (!activeGroup) return;
+    setExpandedNavGroups((previous) => new Set([...previous, activeGroup]));
+  }, [page]);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setMobileMenuOpen(false);
+    };
+    document.body.classList.add('nav-drawer-open');
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.classList.remove('nav-drawer-open');
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [mobileMenuOpen]);
+
+  function toggleNavGroup(group) {
+    setExpandedNavGroups((previous) => {
+      const next = new Set(previous);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  }
 
   return (
     <PowerSyncContext.Provider value={db}>
@@ -295,19 +326,47 @@ export default function App() {
               <button type="button" onClick={refreshApp}>Refresh now</button>
             </div>
           )}
-          <aside className="app-sidebar">
-            <div className="brand"><span className="brand-mark">+</span><span>Pharmacy<br /><strong>POS</strong></span></div>
+          {mobileMenuOpen && <button className="mobile-nav-backdrop" type="button" aria-label="Close navigation" onClick={() => setMobileMenuOpen(false)} />}
+          <aside className={`app-sidebar${mobileMenuOpen ? ' mobile-open' : ''}`} aria-label="Application navigation" role={mobileMenuOpen ? 'dialog' : undefined} aria-modal={mobileMenuOpen ? 'true' : undefined}>
+            <div className="sidebar-brand-row">
+              <div className="brand"><span className="brand-mark">+</span><span>Pharmacy<br /><strong>POS</strong></span></div>
+              <button className="drawer-close" type="button" aria-label="Close navigation" onClick={() => setMobileMenuOpen(false)}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+              </button>
+            </div>
             <nav className="app-nav" aria-label="Main navigation">
-              {Object.entries(navGroups).map(([group, entries]) => <section className="nav-group" key={group} aria-label={group}>
-                <span className="nav-group-label">{group}</span>
-                {entries.map(([key, item]) => <button key={key} className={page === key ? 'active' : ''} aria-current={page === key ? 'page' : undefined} onClick={() => navigateToPage(key)}>
-                  <span className="nav-icon"><NavIcon name={item.icon} /></span>{item.label}
-                </button>)}
-              </section>)}
+              {Object.entries(navGroups).map(([group, entries]) => {
+                const expandable = group !== 'Overview';
+                const expanded = expandedNavGroups.has(group);
+                if (!expandable) {
+                  const [key, item] = entries[0];
+                  return <button key={key} className={`nav-link${page === key ? ' active' : ''}`} aria-current={page === key ? 'page' : undefined} onClick={() => navigateToPage(key)}>
+                    <span className="nav-icon"><NavIcon name={item.icon} /></span><span>{item.label}</span>
+                  </button>;
+                }
+                const groupIcon = entries[0][1].icon;
+                return <section className={`nav-group${expanded ? ' expanded' : ''}`} key={group}>
+                  <button className="nav-group-toggle" type="button" aria-expanded={expanded} onClick={() => toggleNavGroup(group)}>
+                    <span className="nav-icon"><NavIcon name={groupIcon} /></span><span>{group}</span>
+                    <svg className="nav-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+                  </button>
+                  {expanded && <div className="nav-group-items">
+                    {entries.map(([key, item]) => <button key={key} className={`nav-link${page === key ? ' active' : ''}`} aria-current={page === key ? 'page' : undefined} onClick={() => navigateToPage(key)}>
+                      <span className="nav-icon"><NavIcon name={item.icon} /></span><span>{item.label}</span>
+                    </button>)}
+                  </div>}
+                </section>;
+              })}
             </nav>
-            <div className="sidebar-footer"><span className="signed-in">Signed in</span><small>{session.user.email}</small><button className="sign-out" onClick={() => supabase.auth.signOut()}>Sign out</button></div>
+            <div className="sidebar-footer"><span className="signed-in">Signed in</span><small>{session.user.email}</small><button className="sign-out" onClick={() => supabase.auth.signOut()}><PowerIcon /> Sign out</button></div>
           </aside>
-          <header className="mobile-header"><span className="brand-mark">+</span><strong>Pharmacy POS</strong><button onClick={() => supabase.auth.signOut()}>Sign out</button></header>
+          <header className="mobile-header">
+            <button className="menu-toggle" type="button" aria-label="Open navigation" aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(true)}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+            </button>
+            <strong>Pharmacy POS</strong>
+            <button className="mobile-sign-out" onClick={() => supabase.auth.signOut()}>Sign out</button>
+          </header>
           <main className="app-content">
             {ActivePageComponent ? (
               <div className="app-page-panel" aria-live="polite">
@@ -315,6 +374,7 @@ export default function App() {
                 <Suspense fallback={<div className="app-page-loading">Loading page…</div>}>
                   <ActivePageComponent
                     {...(activePageEntry?.[1]?.props || {})}
+                    onNavigatePage={navigateToPage}
                     activeShopId={activeShopId}
                     activeShopName={activeShop?.name || ''}
                     organizationShops={organizationShops}
@@ -328,11 +388,12 @@ export default function App() {
               </div>
             ) : null}
           </main>
-          <nav className="mobile-nav" aria-label="Main navigation">
-            {availablePages.map(([key, item]) => <button key={key} className={page === key ? 'active' : ''} aria-current={page === key ? 'page' : undefined} onClick={() => navigateToPage(key)}><span className="nav-icon"><NavIcon name={item.icon} /></span>{item.label}</button>)}
-          </nav>
         </div>
       )}
     </PowerSyncContext.Provider>
   );
+}
+
+function PowerIcon() {
+  return <svg className="power-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9" /><path d="M7.2 5.8a8 8 0 1 0 9.6 0" /></svg>;
 }

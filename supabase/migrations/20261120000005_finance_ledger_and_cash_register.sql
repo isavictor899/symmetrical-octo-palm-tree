@@ -38,7 +38,7 @@ create table if not exists public.cash_register_sessions (
   closing_note text,
   status text not null default 'open' check (status in ('open', 'closed')),
   check ((status = 'open' and closed_at is null and closed_by is null)
-      or (status = 'closed' and closed_at is not null and closed_by is not null and counted_cash is not null)
+      or (status = 'closed' and closed_at is not null and closed_by is not null and counted_cash is not null))
 );
 
 create unique index if not exists cash_register_one_open_session_per_user_shop_idx

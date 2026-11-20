@@ -3,6 +3,19 @@ import { useRefreshGate } from '../lib/useRefreshGate';
 import { supabase } from '../lib/supabaseClient';
 import { isAdminRole } from '../lib/roles';
 import { defaultBrandColor, applyBrandTheme } from '../lib/theme';
+import {
+  IconAlertTriangle,
+  IconCalendarExclamation,
+  IconCash,
+  IconChartBar,
+  IconDiscount,
+  IconFilePlus,
+  IconMedicalCross,
+  IconPackageImport,
+  IconPill,
+  IconReceipt2,
+  IconShoppingCart,
+} from '@tabler/icons-react';
 import './Dashboard.css';
 
 const currency = new Intl.NumberFormat('en-KE', {
@@ -94,7 +107,7 @@ function roleLabel(role) {
   return value.replace(/[_-]+/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-export default function Dashboard({ activeShopId, activeShopName, organizationShops = [], onActiveShopChange, dataVersion = 0, isActive = true }) {
+export default function Dashboard({ activeShopId, activeShopName, organizationShops = [], onActiveShopChange, onNavigatePage, dataVersion = 0, isActive = true }) {
   const gate = useRefreshGate(isActive, dataVersion);
   const showingShopRef = useRef(null);
   const [allShops, setAllShops] = useState([]);
@@ -435,8 +448,29 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
   if (loading) return <main className="dashboard"><p>Loading dashboard…</p></main>;
   if (error) return <main className="dashboard"><p className="error">{error}</p></main>;
 
+  const quickActions = [
+    { label: 'New sale', page: 'sale', icon: IconShoppingCart, tone: 'lime' },
+    { label: 'Stocked drugs', page: 'stockedDrugs', icon: IconPill, tone: 'blue' },
+    { label: 'Receive stock', page: 'receive', icon: IconPackageImport, tone: 'green' },
+    { label: 'Purchase orders', page: 'purchaseOrders', icon: IconFilePlus, tone: 'amber' },
+    { label: 'Sales report', page: 'salesReport', icon: IconChartBar, tone: 'slate' },
+    { label: 'Expiry review', page: 'expiryReport', icon: IconCalendarExclamation, tone: 'red' },
+  ];
+  const todayReturnTotal = todayReturns.reduce((sum, row) => sum + Number(row.total_amount || 0), 0);
+  const stockedEquipmentCount = equipmentStock.filter((item) => item.quantity > 0).length;
+  const metrics = [
+    { label: 'Net sales today', value: currency.format(totalRevenue), icon: IconCash, tone: 'green' },
+    { label: 'Transactions', value: todaySales.length, icon: IconReceipt2, tone: 'blue' },
+    { label: 'Returns today', value: currency.format(todayReturnTotal), icon: IconShoppingCart, tone: 'amber' },
+    { label: 'Discounts given', value: currency.format(discountTotal), icon: IconDiscount, tone: discountTotal > 0 ? 'amber' : 'slate' },
+    { label: 'Low-stock drugs', value: lowStock.length, icon: IconAlertTriangle, tone: lowStock.length ? 'amber' : 'green' },
+    { label: 'Units received', value: receivedUnits, icon: IconPackageImport, tone: 'blue' },
+    { label: 'Expired units', value: expiredUnits, icon: IconCalendarExclamation, tone: expiredUnits ? 'red' : 'green' },
+    { label: 'Equipment in stock', value: stockedEquipmentCount, icon: IconMedicalCross, tone: 'slate' },
+  ];
+
   return <main className="dashboard">
-    <header><div><p className="eyebrow">{shopName}</p><h1>Today’s sales and stock</h1></div><time>{new Date().toLocaleDateString('en-KE', { dateStyle: 'full' })}</time></header>
+    <header className="dashboard-heading"><div><p className="eyebrow">{shopName}</p><h1>Dashboard</h1><p className="dashboard-subtitle">Your pharmacy overview for today.</p></div><time>{new Date().toLocaleDateString('en-KE', { dateStyle: 'full' })}</time></header>
     {allShops.length > 1 && (
       <nav className="shop-switcher" aria-label="Switch shop">
         {allShops.map((s) => (
@@ -455,15 +489,20 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
       </nav>
     )}
     {loadingMore && <div className="loading-more">Loading additional dashboard data…</div>}
-    <section className="metrics" aria-label="Today’s sales summary">
-      <article><span>Net sales today</span><strong>{currency.format(totalRevenue)}</strong></article>
-      <article><span>Returns today</span><strong>{currency.format(todayReturns.reduce((sum, row) => sum + Number(row.total_amount || 0), 0))}</strong></article>
-      <article><span>Transactions</span><strong>{todaySales.length}</strong></article>
-      <article><span>Discounts given today</span><strong className={discountTotal > 0 ? 'warning' : ''}>{currency.format(discountTotal)}</strong></article>
-      <article><span>Units received today</span><strong>{receivedUnits}</strong></article>
-      <article><span>Expired units</span><strong className={expiredUnits > 0 ? 'critical' : ''}>{expiredUnits}</strong></article>
-      <article><span>Low-stock drugs</span><strong>{lowStock.length}</strong></article>
-      <article><span>Equipment and supplies</span><strong>{equipmentStock.reduce((count, item) => count + (item.quantity > 0 ? 1 : 0), 0)}</strong></article>
+    <section className="quick-actions panel" aria-labelledby="quick-actions-title">
+      <h2 id="quick-actions-title">Quick actions</h2>
+      <div className="quick-action-list">
+        {quickActions.map(({ label, page: targetPage, icon: Icon, tone }) => <button key={targetPage} type="button" className="quick-action" onClick={() => onNavigatePage?.(targetPage)}>
+          <span className={`quick-action-icon tone-${tone}`}><Icon size={21} stroke={1.8} aria-hidden="true" /></span>
+          <span>{label}</span>
+        </button>)}
+      </div>
+    </section>
+    <section className="metrics" aria-label="Today’s sales and stock summary">
+      {metrics.map(({ label, value, icon: Icon, tone }) => <article className="metric-card" key={label}>
+        <div className="metric-heading"><span>{label}</span><span className={`metric-icon tone-${tone}`}><Icon size={20} stroke={1.8} aria-hidden="true" /></span></div>
+        <strong>{value}</strong>
+      </article>)}
     </section>
     <section className="panel recent-transactions">
       <div className="panel-title-row">
