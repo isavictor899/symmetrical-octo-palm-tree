@@ -412,13 +412,18 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
     const refunds = todayReturns.filter((row) => row.refund_method === method);
     return { method, count: sales.length, total: sales.reduce((sum, sale) => sum + Number(sale.total_amount), 0) - refunds.reduce((sum, row) => sum + Number(row.total_amount || 0), 0) };
   }), [todaySales, todayReturns]);
-  const receivedUnits = useMemo(() => receivedStock.reduce((total, movement) => total + Number(movement.quantity), 0), [receivedStock]);
-  const receivedCost = useMemo(() => receivedStock.reduce(
-    (total, movement) => movement.movement_type === 'received'
-      ? total + Number(movement.quantity) * Number(movement.batches?.cost_price || 0)
-      : total,
-    0
-  ), [receivedStock]);
+  const supplierReceipts = useMemo(
+    () => receivedStock.filter((movement) => movement.movement_type === 'received'),
+    [receivedStock]
+  );
+  const receivedUnits = useMemo(
+    () => supplierReceipts.reduce((total, movement) => total + Number(movement.quantity || 0), 0),
+    [supplierReceipts]
+  );
+  const receivedCost = useMemo(
+    () => supplierReceipts.reduce((total, movement) => total + Number(movement.quantity || 0) * Number(movement.batches?.cost_price || 0), 0),
+    [supplierReceipts]
+  );
   const expiredUnits = useMemo(() => expiredStock.reduce(
     (total, batch) => total + Number(batch.quantity_remaining || 0), 0
   ), [expiredStock]);
@@ -508,8 +513,8 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
           ))}</ul>
         </>}
       </article>
-      <article className="panel"><h2>Stock received today</h2>
-        {!receivedStock.length ? <p className="muted">No stock has been received today.</p> : <><div className="received-summary"><span><small>Units received</small><strong>{receivedUnits}</strong></span><span><small>Purchase value</small><strong>{currency.format(receivedCost)}</strong></span></div><ul className="stock-list">{receivedStock.map((movement) => <li key={movement.id}><span><strong>{movement.batches?.drugs?.name || 'Stock receipt'}</strong><small>{movementLabel(movement, sourceShopNames)} · {new Date(movement.created_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}</small></span><strong>{movement.quantity} units</strong></li>)}</ul></>}
+      <article className="panel"><h2>Supplier stock received today</h2>
+        {!supplierReceipts.length ? <p className="muted">No supplier stock has been received today.</p> : <><div className="received-summary"><span><small>Units received</small><strong>{receivedUnits}</strong></span><span><small>Purchase value</small><strong>{currency.format(receivedCost)}</strong></span></div><ul className="stock-list">{supplierReceipts.map((movement) => <li key={movement.id}><span><strong>{movement.batches?.drugs?.name || 'Stock receipt'}</strong><small>{movementLabel(movement, sourceShopNames)} · {new Date(movement.created_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}</small></span><strong>{movement.quantity} units</strong></li>)}</ul></>}
       </article>
       <article className="panel"><h2>Medical equipment and supplies</h2>
         {!equipmentStock.length ? <p className="muted">No equipment stock has been recorded for this shop.</p> : <ul className="stock-list">{equipmentStock.map((item) => <li key={item.id}><span><strong>{item.name}</strong><small>{item.category || item.unit} · Average cost {currency.format(item.averageCost)} · Selling price {currency.format(item.sellingPrice)}</small></span><strong>{item.quantity} {item.unit}</strong></li>)}</ul>}

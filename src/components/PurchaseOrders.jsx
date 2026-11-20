@@ -46,7 +46,18 @@ export default function PurchaseOrders({ activeShopId, activeShopName, isActive 
   const [saving, setSaving] = useState(false);
   const [lastGrn, setLastGrn] = useState(null);
 
-  const { data: drugs } = useQuery(isActive ? 'SELECT id, name, generic_name FROM drugs ORDER BY name' : 'SELECT 1 WHERE 0');
+  // A purchase order can only be raised for drugs this facility already
+  // carries. Adding a brand-new drug still happens through Receive stock.
+  const { data: drugs } = useQuery(
+    shopId && isActive
+      ? `SELECT DISTINCT drugs.id, drugs.name, drugs.generic_name
+           FROM shop_drugs
+           JOIN drugs ON drugs.id = shop_drugs.drug_id
+          WHERE shop_drugs.shop_id = ?
+          ORDER BY drugs.name`
+      : 'SELECT 1 WHERE 0',
+    shopId && isActive ? [shopId] : []
+  );
   const { data: suppliers } = useQuery(isActive ? 'SELECT id, name FROM suppliers ORDER BY name' : 'SELECT 1 WHERE 0');
   const drugOptions = useMemo(() => drugs || [], [drugs]);
 
