@@ -92,9 +92,13 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
   // of each batch's synced stock is already spoken for by a sale that
   // hasn't reached the server yet. Without this, a second offline sale of
   // the same batch has no way to know the first one already happened.
-  const { data: pendingItemsRows } = useQuery(isActive ? 'SELECT id, items_json, status, last_error FROM pending_sales' : 'SELECT 1 WHERE 0');
-  const waitingSales = (pendingItemsRows || []).filter((row) => !row.status || row.status === 'pending');
-  const failedSales = (pendingItemsRows || []).filter((row) => row.status === 'failed');
+  const { data: pendingItemsRows } = useQuery(isActive ? 'SELECT id, shop_id, items_json, status, last_error FROM pending_sales' : 'SELECT 1 WHERE 0');
+  // A device can retain queued sales after an administrator switches shops.
+  // Every sale status, error and reserved batch quantity shown here must belong
+  // to the shop currently open at the till.
+  const shopPendingSales = (pendingItemsRows || []).filter((row) => row.shop_id === effectiveShopId);
+  const waitingSales = shopPendingSales.filter((row) => !row.status || row.status === 'pending');
+  const failedSales = shopPendingSales.filter((row) => row.status === 'failed');
   const pendingCount = waitingSales.length;
 
   const [recentSoldQtyByBatch, setRecentSoldQtyByBatch] = useState({});
@@ -450,6 +454,27 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
     setCart((prev) => prev.filter((line) => lineKey(line) !== key));
   }
 
+  function cancelCurrentSale() {
+    setCart([]);
+    setPrescriptionReference('');
+    setPrescriberName('');
+    setPrescriptionDate('');
+    setCheckoutError(null);
+    setLastReceipt(null);
+    setStatus('idle');
+  }
+
+  async function cancelFailedSale(saleId) {
+    try {
+      // A failed queued sale was rejected before the server recorded it, so it
+      // is safe to remove only this local failed outbox item. Pending sales are
+      // deliberately not cancellable here because they may still sync.
+      await db.execute("DELETE FROM pending_sales WHERE id = ? AND status = 'failed'", [saleId]);
+    } catch {
+      setCheckoutError('Could not cancel the failed sale on this device. Please try again.');
+    }
+  }
+
   const baseLinePrice = (line) => line.kind === 'equipment' ? line.item.selling_price : line.batch.selling_price;
   const lineDiscount = (line) => line.kind === 'equipment'
     ? 0
@@ -593,7 +618,10 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
         <strong>{failedSales.length} sale{failedSales.length === 1 ? '' : 's'} need attention</strong>
         {failedSales.map((row) => <div key={row.id} className="notice-row">
           <span>{row.last_error || 'The server rejected this sale.'}</span>
-          <button type="button" onClick={async () => { await db.execute("UPDATE pending_sales SET status = 'pending', last_error = NULL WHERE id = ?", [row.id]); flushAll(db); }}>Retry</button>
+          <span className="notice-row-actions">
+            <button type="button" onClick={async () => { await db.execute("UPDATE pending_sales SET status = 'pending', last_error = NULL WHERE id = ?", [row.id]); flushAll(db); }}>Retry</button>
+            <button type="button" className="notice-cancel" onClick={() => cancelFailedSale(row.id)}>Cancel sale</button>
+          </span>
         </div>)}
       </section>}
 
@@ -765,6 +793,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
             </button>
 
             {checkoutError && <div className="inline-error">{checkoutError}</div>}
+            {checkoutError && cart.length > 0 && <button type="button" className="cancel-current-sale" onClick={cancelCurrentSale}>Cancel current sale</button>}
 
             {status === 'done' && lastReceipt && (
               <div className="inline-success">
