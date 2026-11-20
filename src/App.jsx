@@ -4,12 +4,15 @@ import {
   IconCash,
   IconCashRegister,
   IconChartBar,
+  IconChevronDown,
   IconDashboard,
   IconFileText,
+  IconHistory,
   IconLogout2,
   IconMenu2,
   IconPackageImport,
   IconPill,
+  IconSearch,
   IconSettings,
   IconShoppingCart,
   IconX,
@@ -40,6 +43,7 @@ function NavIcon({ name }) {
   const icons = {
     dashboard: IconDashboard,
     sale: IconShoppingCart,
+    salesReturns: IconHistory,
     receive: IconPackageImport,
     purchaseOrders: IconFileText,
     stockedDrugs: IconPill,
@@ -77,7 +81,8 @@ function usePwaUpdateToast() {
 
 const pages = {
   dashboard: { label: 'Dashboard', icon: 'dashboard', component: Dashboard, group: 'Overview' },
-  sale: { label: 'Point of sale', icon: 'sale', component: SaleEntry, group: 'Sales' },
+  sale: { label: 'New sale', icon: 'sale', component: SaleEntry, group: 'Sales' },
+  salesReturns: { label: 'Sales returns', icon: 'salesReturns', component: SaleEntry, group: 'Sales', props: { mode: 'return' } },
   stockedDrugs: { label: 'Stocked drugs', icon: 'stockedDrugs', component: StockedDrugs, group: 'Inventory' },
   receive: { label: 'Receive stock', icon: 'receive', component: ReceiveStock, group: 'Inventory' },
   purchaseOrders: { label: 'Purchase orders', icon: 'purchaseOrders', component: PurchaseOrders, group: 'Inventory' },
@@ -101,11 +106,15 @@ export default function App() {
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [page, setPage] = useState('sale');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [staffName, setStaffName] = useState('');
+  const [globalSearchText, setGlobalSearchText] = useState('');
   const [expandedNavGroups, setExpandedNavGroups] = useState(() => new Set(['Sales']));
   const [_visitedPages, setVisitedPages] = useState(() => new Set(['sale']));
   const [staffRole, setStaffRole] = useState(null);
   const [organizationShops, setOrganizationShops] = useState([]);
   const [activeShopId, setActiveShopId] = useState(null);
+  const [saleSearchTerm, setSaleSearchTerm] = useState('');
   const [dataVersion, setDataVersion] = useState(0);
   const lastSessionUserId = useRef(null);
   const lastSetupUserId = useRef(null);
@@ -141,6 +150,7 @@ export default function App() {
       if (!nextSession) {
         lastSetupUserId.current = null;
         setStaffRole(null);
+        setStaffName('');
         setOrganizationShops([]);
         setActiveShopId(null);
         setVisitedPages(new Set(['sale']));
@@ -169,11 +179,12 @@ export default function App() {
 
         const { data, error } = await supabase
           .from('staff')
-          .select('role, shop_id, shops(name, theme_color, organization_id)')
+          .select('role, full_name, shop_id, shops(name, theme_color, organization_id)')
           .eq('auth_user_id', nextSession.user.id)
           .maybeSingle();
 
         setStaffRole(data?.role || null);
+        setStaffName(data?.full_name || '');
         setActiveShopId(data?.shop_id || null);
 
         if (error) {
@@ -263,6 +274,9 @@ export default function App() {
   }
 
   const activeShop = organizationShops.find((shop) => shop.id === activeShopId) || null;
+  const profileName = staffName || session?.user?.email || 'Staff member';
+  const profileInitials = profileName.split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((part) => part[0].toUpperCase()).join('') || 'U';
+  const profileRole = String(staffRole || 'Staff').replace(/[_-]+/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
   const activePageEntry = Object.entries(pages).find(([key]) => key === page) || Object.entries(pages)[0];
   const ActivePageComponent = activePageEntry?.[1]?.component;
   const navGroups = availablePages.reduce((groups, [key, item]) => {
@@ -291,6 +305,13 @@ export default function App() {
     };
   }, [mobileMenuOpen]);
 
+  useEffect(() => {
+    if (!profileMenuOpen) return undefined;
+    const closeOnEscape = (event) => { if (event.key === 'Escape') setProfileMenuOpen(false); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [profileMenuOpen]);
+
   function toggleNavGroup(group) {
     setExpandedNavGroups((previous) => {
       const next = new Set(previous);
@@ -298,6 +319,14 @@ export default function App() {
       else next.add(group);
       return next;
     });
+  }
+
+  function submitGlobalSearch(event) {
+    event.preventDefault();
+    const term = globalSearchText.trim();
+    if (!term) return;
+    setSaleSearchTerm(term);
+    navigateToPage('sale');
   }
 
   return (
@@ -363,8 +392,25 @@ export default function App() {
               <strong className="desktop-context-page">{activePageEntry?.[1]?.label || 'Dashboard'}</strong>
               {activeShop?.name && <small className="desktop-context-shop">{activeShop.name}</small>}
             </div>
+            <form className="topbar-search" role="search" onSubmit={submitGlobalSearch}>
+              <IconSearch size={18} stroke={1.8} aria-hidden="true" />
+              <input value={globalSearchText} onChange={(event) => setGlobalSearchText(event.target.value)} placeholder="Search medicines…" aria-label="Search medicines and equipment" />
+            </form>
             <NotificationBell activeShopId={activeShopId} userId={session.user.id} onNavigatePage={navigateToPage} availablePageKeys={availablePages.map(([key]) => key)} dataVersion={dataVersion} />
-            <button className="mobile-sign-out" onClick={() => supabase.auth.signOut()}>Sign out</button>
+            <div className="profile-control">
+              <button className="profile-trigger" type="button" aria-label={`Profile menu for ${profileName}`} aria-expanded={profileMenuOpen} onClick={() => setProfileMenuOpen((open) => !open)}>
+                <span className="profile-avatar" aria-hidden="true">{profileInitials}</span>
+                <span className="profile-copy"><strong>{profileName}</strong><small>{profileRole}</small></span>
+                <IconChevronDown size={16} stroke={1.8} aria-hidden="true" />
+              </button>
+              {profileMenuOpen && <>
+                <button className="profile-menu-dismiss" type="button" aria-label="Close profile menu" onClick={() => setProfileMenuOpen(false)} />
+                <div className="profile-menu" role="menu">
+                  <div className="profile-menu-identity"><strong>{profileName}</strong><small>{session.user.email}</small><span>{profileRole}{activeShop?.name ? ` · ${activeShop.name}` : ''}</span></div>
+                  <button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); supabase.auth.signOut(); }}><IconLogout2 size={17} /> Sign out</button>
+                </div>
+              </>}
+            </div>
           </header>
           <main className="app-content">
             {ActivePageComponent ? (
@@ -373,6 +419,7 @@ export default function App() {
                 <Suspense fallback={<div className="app-page-loading">Loading page…</div>}>
                   <ActivePageComponent
                     {...(activePageEntry?.[1]?.props || {})}
+                    initialSearch={page === 'sale' ? saleSearchTerm : ''}
                     onNavigatePage={navigateToPage}
                     activeShopId={activeShopId}
                     activeShopName={activeShop?.name || ''}

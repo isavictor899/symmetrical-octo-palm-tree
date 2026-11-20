@@ -40,7 +40,8 @@ function pickFefoBatch(drug) {
   return [...sellable].sort((a, b) => new Date(a.expiry_date) - new Date(b.expiry_date))[0];
 }
 
-export default function SaleEntry({ activeShopId, activeShopName, isActive = true }) {
+export default function SaleEntry({ activeShopId, activeShopName, isActive = true, mode = 'sale', initialSearch = '' }) {
+  const pageMode = mode;
   const db = usePowerSync();
   const syncStatus = useStatus(); // { connected, ... } ” lets us show online/offline
 
@@ -171,7 +172,6 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
   const [status, setStatus] = useState('idle'); // idle | submitting | done
   const [checkoutError, setCheckoutError] = useState(null);
   const [lastReceipt, setLastReceipt] = useState(null);
-  const [pageMode, setPageMode] = useState('sale');
   const [returnSearch, setReturnSearch] = useState('');
   const [returnRows, setReturnRows] = useState([]);
   const [selectedReturnItem, setSelectedReturnItem] = useState(null);
@@ -183,6 +183,10 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
   const [returnSaving, setReturnSaving] = useState(false);
   const [returnError, setReturnError] = useState('');
   const [returnMessage, setReturnMessage] = useState('');
+
+  useEffect(() => {
+    if (pageMode === 'sale') setQuery(initialSearch || '');
+  }, [effectiveShopId, initialSearch, pageMode]);
   const cartNeedsPrescription = cart.some((line) => line.requiresPrescription === true);
   const cartHasUnclassifiedDrug = cart.some((line) => line.requiresPrescription === null);
 
@@ -598,18 +602,11 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
             {pendingCount > 0 && <span className="status-warning">{pendingCount} sale{pendingCount === 1 ? '' : 's'} waiting</span>}
             {failedSales.length > 0 && <span className="status-critical">{failedSales.length} need attention</span>}
           </div>
-          <h1>New sale</h1>
-          {activeShopName && <p>Selling from {activeShopName}</p>}
+          <h1>{pageMode === 'sale' ? 'New sale' : 'Sales returns'}</h1>
+          {activeShopName && <p>{pageMode === 'sale' ? 'Selling from' : 'Processing returns for'} {activeShopName}</p>}
         </div>
         <div className="pos-header-actions">
-          <button type="button" className={`button ${pageMode === 'sale' ? 'secondary' : 'ghost'}`} onClick={() => setPageMode('sale')}>New sale</button>
-          <button type="button" className={`button ${pageMode === 'return' ? 'secondary' : 'ghost'}`} onClick={() => { setPageMode('return'); setSelectedReturnItem(null); setReturnMessage(''); setReturnError(''); }}>Return</button>
-          <button type="button" className="button secondary" onClick={() => retryFetchStaff()}>
-            {retrying ? 'Retrying…' : 'Retry staff sync'}
-          </button>
-          <button type="button" className="button ghost" onClick={() => supabase.auth.signOut()}>
-            Sign out
-          </button>
+          <button type="button" className="button secondary" onClick={() => retryFetchStaff()}>{retrying ? 'Retrying…' : 'Retry staff sync'}</button>
         </div>
       </header>
 
