@@ -1,5 +1,19 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { PowerSyncContext } from '@powersync/react';
+import {
+  IconCash,
+  IconCashRegister,
+  IconChartBar,
+  IconDashboard,
+  IconFileText,
+  IconLogout2,
+  IconMenu2,
+  IconPackageImport,
+  IconPill,
+  IconSettings,
+  IconShoppingCart,
+  IconX,
+} from '@tabler/icons-react';
 import { supabase } from './lib/supabaseClient';
 import { db, connector } from './lib/powersync/database';
 import { flushAll } from './lib/powersync/flush';
@@ -8,6 +22,7 @@ import { canManageStockedDrugs, canReceiveStock, isAdminRole } from './lib/roles
 import { defaultBrandColor, applyBrandTheme, applyCachedThemeIfAny, cacheTheme } from './lib/theme';
 import Login from './components/Login';
 import PageErrorBoundary from './components/PageErrorBoundary';
+import NotificationBell from './components/NotificationBell';
 import './App.css';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -22,41 +37,19 @@ const Reports = lazy(() => import('./components/Reports'));
 
 
 function NavIcon({ name }) {
-  const common = {
-    width: 18,
-    height: 18,
-    viewBox: '0 0 24 24',
-    fill: 'none',
-    stroke: 'currentColor',
-    strokeWidth: 2,
-    strokeLinecap: 'round',
-    strokeLinejoin: 'round',
-    'aria-hidden': 'true',
-    focusable: 'false',
+  const icons = {
+    dashboard: IconDashboard,
+    sale: IconShoppingCart,
+    receive: IconPackageImport,
+    purchaseOrders: IconFileText,
+    stockedDrugs: IconPill,
+    monthlyReport: IconChartBar,
+    finance: IconCash,
+    register: IconCashRegister,
+    settings: IconSettings,
   };
-
-  switch (name) {
-    case 'dashboard':
-      return <svg {...common}><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg>;
-    case 'sale':
-      return <svg {...common} strokeWidth={1.6}><rect x="6.5" y="4.5" width="11" height="15" rx="1.5" /><rect x="8.5" y="6.5" width="7" height="5" /><path d="M8.5 17.5H9.5" /><path d="M14.5 17.5H15.5" /><path d="M11.5 17.5H12.5" /><path d="M8.5 15.5H9.5" /><path d="M14.5 15.5H15.5" /><path d="M11.5 15.5H12.5" /><path d="M8.5 13.5H9.5" /><path d="M14.5 13.5H15.5" /><path d="M11.5 13.5H12.5" /></svg>;
-    case 'receive':
-      return <svg {...common}><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 19h14" /><path d="M7 19v-3" /><path d="M17 19v-3" /></svg>;
-    case 'purchaseOrders':
-      return <svg {...common}><path d="M6 3h9l3 3v15H6z" /><path d="M15 3v4h4" /><path d="M9 11h6" /><path d="M9 15h6" /></svg>;
-    case 'stockedDrugs':
-      return <svg width="18" height="18" viewBox="0 0 512 512" fill="currentColor" aria-hidden="true" focusable="false"><path d="M403.5 163.765 330.137 90.353h25.958c5.544 0 10.336-4.102 10.336-9.646V10.432C366.431 4.889 361.64 0 356.096 0H155.311c-5.544 0-9.743 4.889-9.743 10.432v70.275c0 5.544 4.199 9.646 9.743 9.646h25.958l-73.066 73.412c-1.882 1.882-2.792 4.632-2.792 7.295v331.294c0 5.544 4.199 9.646 9.743 9.646h281.098c5.544 0 10.336-4.102 10.336-9.646V171.06c0-2.663-1.206-5.413-3.088-7.295zM165.647 70.275V20.078h180.706v50.196H165.647zM386.51 371.451H245.961V250.98H386.51v120.471zm0-140.549H235.625c-5.544 0-9.743 4.889-9.743 10.432v140.549c0 5.544 4.199 9.646 9.743 9.646H386.51v100.392H125.49V175.218l84.175-84.865h92.076l84.768 84.865v55.684z" /><path d="M326.275 301.176v-30.117h-20.079v30.117h-30.118v20.079h30.118v30.118h20.079v-30.118h30.117v-20.079z" /></svg>;
-    case 'monthlyReport':
-      return <svg {...common}><path d="M4 19V5" /><path d="M4 19h16" /><path d="M8 15v-4" /><path d="M12 15V8" /><path d="M16 15v-6" /></svg>;
-    case 'finance':
-      return <svg {...common}><circle cx="12" cy="12" r="8.5" /><path d="M12 7v10" /><path d="M15 9.5c0-1.1-1.3-2-3-2s-3 .9-3 2 1.3 2 3 2 3 .9 3 2-1.3 2-3 2-3-.9-3-2" /></svg>;
-    case 'register':
-      return <svg {...common}><path d="M4 8h16v11H4z" /><path d="M6 8V5h12v3" /><path d="M8 13h8" /><path d="M8 16h4" /></svg>;
-    case 'settings':
-      return <svg {...common}><circle cx="12" cy="12" r="3" /><path d="M12 2v3" /><path d="M12 19v3" /><path d="M4.93 4.93l2.12 2.12" /><path d="m16.95 16.95 2.12 2.12" /><path d="M2 12h3" /><path d="M19 12h3" /><path d="m4.93 19.07 2.12-2.12" /><path d="m16.95 7.05 2.12-2.12" /></svg>;
-    default:
-      return null;
-  }
+  const Icon = icons[name];
+  return Icon ? <Icon size={19} stroke={1.8} aria-hidden="true" focusable="false" /> : null;
 }
 
 function usePwaUpdateToast() {
@@ -329,9 +322,9 @@ export default function App() {
           {mobileMenuOpen && <button className="mobile-nav-backdrop" type="button" aria-label="Close navigation" onClick={() => setMobileMenuOpen(false)} />}
           <aside className={`app-sidebar${mobileMenuOpen ? ' mobile-open' : ''}`} aria-label="Application navigation" role={mobileMenuOpen ? 'dialog' : undefined} aria-modal={mobileMenuOpen ? 'true' : undefined}>
             <div className="sidebar-brand-row">
-              <div className="brand"><span className="brand-mark">+</span><span>Pharmacy<br /><strong>POS</strong></span></div>
+              <div className="brand"><span className="brand-mark"><IconPill size={20} stroke={2} aria-hidden="true" /></span><span>Pharmacy<br /><strong>POS</strong></span></div>
               <button className="drawer-close" type="button" aria-label="Close navigation" onClick={() => setMobileMenuOpen(false)}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+                <IconX size={20} stroke={1.8} aria-hidden="true" />
               </button>
             </div>
             <nav className="app-nav" aria-label="Main navigation">
@@ -358,13 +351,19 @@ export default function App() {
                 </section>;
               })}
             </nav>
-            <div className="sidebar-footer"><span className="signed-in">Signed in</span><small>{session.user.email}</small><button className="sign-out" onClick={() => supabase.auth.signOut()}><PowerIcon /> Sign out</button></div>
+            <div className="sidebar-footer"><span className="signed-in">Signed in</span><small>{session.user.email}</small><button className="sign-out" onClick={() => supabase.auth.signOut()}><IconLogout2 size={17} stroke={1.8} aria-hidden="true" /> Sign out</button></div>
           </aside>
-          <header className="mobile-header">
+          <header className="app-topbar">
             <button className="menu-toggle" type="button" aria-label="Open navigation" aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(true)}>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+              <IconMenu2 size={22} stroke={1.8} aria-hidden="true" />
             </button>
-            <strong>Pharmacy POS</strong>
+            <div className="topbar-context">
+              <span className="mobile-app-name">Pharmacy POS</span>
+              <span className="desktop-context-group">{activePageEntry?.[1]?.group || 'Workspace'}</span>
+              <strong className="desktop-context-page">{activePageEntry?.[1]?.label || 'Dashboard'}</strong>
+              {activeShop?.name && <small className="desktop-context-shop">{activeShop.name}</small>}
+            </div>
+            <NotificationBell activeShopId={activeShopId} userId={session.user.id} onNavigatePage={navigateToPage} availablePageKeys={availablePages.map(([key]) => key)} dataVersion={dataVersion} />
             <button className="mobile-sign-out" onClick={() => supabase.auth.signOut()}>Sign out</button>
           </header>
           <main className="app-content">
@@ -392,8 +391,4 @@ export default function App() {
       )}
     </PowerSyncContext.Provider>
   );
-}
-
-function PowerIcon() {
-  return <svg className="power-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9" /><path d="M7.2 5.8a8 8 0 1 0 9.6 0" /></svg>;
 }

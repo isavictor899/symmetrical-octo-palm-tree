@@ -163,12 +163,15 @@ textarea { resize: vertical; }
   min-height: 100vh;
   display: grid;
   grid-template-columns: 250px minmax(0, 1fr);
+  grid-template-rows: 58px minmax(0, 1fr);
   background: var(--surface-page);
 }
 
 .app-sidebar {
   position: sticky;
   top: 0;
+  grid-column: 1;
+  grid-row: 1 / 3;
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -245,13 +248,54 @@ textarea { resize: vertical; }
 .drawer-close { display: none; }
 .mobile-nav-backdrop { display: none; }
 
-.app-content { min-width: 0; min-height: 100vh; display: flex; flex-direction: column; }
+.app-content { grid-column: 2; grid-row: 2; min-width: 0; min-height: calc(100vh - 58px); display: flex; flex-direction: column; }
 .app-page-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .app-page-panel[hidden] { display: none; }
 .app-page-panel > * { flex: 1; min-width: 0; }
 .app-page-loading { min-height: 40vh; display: grid; place-items: center; color: var(--text-muted); }
 
-.mobile-header { display: none; }
+.app-topbar { position: sticky; z-index: 22; top: 0; grid-column: 2; grid-row: 1; min-width: 0; min-height: 58px; display: flex; align-items: center; gap: 12px; padding: 7px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.menu-toggle { display: none; }
+.topbar-context { min-width: 0; display: flex; align-items: baseline; gap: 10px; flex: 1; }
+.desktop-context-group { color: var(--text-muted); font-size: 12px; }
+.desktop-context-page { font-size: 14px; }
+.desktop-context-shop { overflow: hidden; max-width: 240px; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-app-name { display: none; }
+.mobile-sign-out { display: none; }
+
+/* Notifications are sourced from the selected shop's sales, stock movements, and batches. */
+.notification-control { position: relative; display: inline-flex; flex: 0 0 auto; }
+.notification-trigger { position: relative; display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 1px solid transparent; border-radius: 9px; color: var(--text); background: transparent; cursor: pointer; }
+.notification-trigger:hover, .notification-trigger[aria-expanded='true'] { border-color: var(--border); background: var(--surface-subtle); }
+.notification-count { position: absolute; top: 1px; right: 1px; min-width: 17px; height: 17px; display: grid; place-items: center; padding: 0 4px; border: 2px solid var(--surface); border-radius: 999px; color: #fff; background: #c5372a; font-size: 9px; font-weight: 800; line-height: 1; }
+.notification-dismiss { position: fixed; z-index: 19; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; cursor: default; }
+.notification-popover { position: absolute; z-index: 21; top: calc(100% + 8px); right: 0; width: min(380px, calc(100vw - 24px)); overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: 0 14px 42px rgba(20, 24, 22, 0.18); }
+.notification-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px 11px; border-bottom: 1px solid var(--border-soft); }
+.notification-heading > div { display: grid; gap: 1px; }
+.notification-heading strong { font-size: 14px; }
+.notification-heading span, .notification-footer { color: var(--text-muted); font-size: 11px; }
+.notification-icon-action { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); background: var(--surface); cursor: pointer; }
+.notification-icon-action:hover:not(:disabled) { color: var(--text); background: var(--surface-subtle); }
+.notification-icon-action:disabled { opacity: 0.55; cursor: wait; }
+.notification-mark-read { display: inline-flex; align-items: center; gap: 5px; margin: 9px 14px 3px; padding: 4px 0; border: 0; color: var(--brand-primary); background: transparent; font-size: 11px; font-weight: 700; cursor: pointer; }
+.notification-list { max-height: min(420px, 60vh); overflow-y: auto; }
+.notification-item { position: relative; width: 100%; display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 0; border-bottom: 1px solid var(--border-soft); color: var(--text); background: var(--surface); text-align: left; cursor: pointer; }
+.notification-item:hover { background: var(--surface-subtle); }
+.notification-item.unread { background: color-mix(in srgb, var(--brand-primary) 5%, var(--surface)); }
+.notification-item-icon { width: 32px; height: 32px; display: grid; place-items: center; flex: 0 0 32px; border-radius: 8px; color: var(--brand-primary); background: var(--brand-tint); }
+.notification-item-icon.sale { color: #176b45; background: #e7f4eb; }
+.notification-item-icon.stock { color: #2768b2; background: #e9f1fb; }
+.notification-item-icon.expiry { color: #9a5b00; background: #fff3df; }
+.notification-item-copy { min-width: 0; display: grid; gap: 2px; flex: 1; }
+.notification-item-copy > strong { font-size: 12px; }
+.notification-item-copy > span { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.notification-item-copy > small { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; }
+.notification-unread-dot { width: 7px; height: 7px; flex: 0 0 7px; margin: 6px 1px 0; border-radius: 50%; background: var(--brand-primary); }
+.notification-state { padding: 24px 18px; color: var(--text-muted); font-size: 12px; text-align: center; }
+.notification-state.notification-error { color: var(--danger); }
+.notification-footer { padding: 9px 14px; border-top: 1px solid var(--border-soft); background: var(--surface-subtle); font-size: 10px; }
+.is-spinning { animation: notification-spin 0.8s linear infinite; }
+@keyframes notification-spin { to { transform: rotate(360deg); } }
 
 /* ── Sign-in ─────────────────────────────────────────────────── */
 .login-page { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; background: var(--surface-page); }
@@ -392,14 +436,16 @@ textarea { resize: vertical; }
 /* ── Mobile ──────────────────────────────────────────────────── */
 @media (max-width: 760px) {
   .app-shell { display: block; padding-bottom: 0; }
+  .app-topbar { min-height: 54px; padding: 8px 14px; }
   .app-content { min-height: calc(100vh - 54px); }
-
-  .mobile-header { position: sticky; z-index: 10; top: 0; min-height: 54px; display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--surface); }
-  .mobile-header strong { flex: 1; font-size: 14px; font-weight: 800; }
-  .mobile-header .mobile-sign-out { margin-left: auto; padding: 6px 0; border: 0; color: var(--brand-primary); background: transparent; font-size: 12px; font-weight: 700; }
+  .mobile-app-name { display: inline; font-size: 14px; font-weight: 800; }
+  .desktop-context-group, .desktop-context-page, .desktop-context-shop { display: none; }
+  .app-topbar .mobile-sign-out { display: inline-flex; margin-left: 0; padding: 6px 0; border: 0; color: var(--brand-primary); background: transparent; font-size: 12px; font-weight: 700; cursor: pointer; }
   .menu-toggle { display: grid; place-items: center; width: 36px; height: 36px; padding: 6px; border: 0; border-radius: 8px; color: var(--text); background: transparent; cursor: pointer; }
   .menu-toggle:hover { background: var(--surface-hover); }
   .menu-toggle svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+  .app-topbar .notification-trigger { width: 36px; height: 36px; }
+  .notification-popover { position: fixed; top: 58px; right: 8px; width: min(380px, calc(100vw - 16px)); }
 
   .mobile-nav-backdrop { position: fixed; z-index: 29; inset: 0; display: block; width: 100%; height: 100%; padding: 0; border: 0; background: rgba(8, 20, 19, 0.48); animation: nav-backdrop-in 0.16s ease-out; }
   .app-sidebar { position: fixed; z-index: 30; inset: 0 auto 0 0; width: min(282px, 86vw); height: 100dvh; display: flex; padding-top: 10px; border-right: 1px solid #175454; transform: translateX(-102%); visibility: hidden; transition: transform 0.2s ease, visibility 0.2s; box-shadow: 12px 0 34px rgba(0, 0, 0, 0.2); }

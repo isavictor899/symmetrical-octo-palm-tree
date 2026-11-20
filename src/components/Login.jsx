@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { IconPill } from '@tabler/icons-react';
 import { supabase } from '../lib/supabaseClient';
 
 export default function Login({ recoveryMode = false, onRecoveryComplete }) {
@@ -83,7 +84,7 @@ export default function Login({ recoveryMode = false, onRecoveryComplete }) {
     <div className="login-page">
       <form className="login-card" onSubmit={isUpdate ? handlePasswordUpdate : isResetRequest ? handleResetRequest : handleSubmit}>
         <div className="login-brand">
-          <span className="brand-mark">+</span>
+          <span className="brand-mark"><IconPill size={20} stroke={2} aria-hidden="true" /></span>
           <span>Pharmacy POS</span>
         </div>
         <h1 className="login-title">{title}</h1>

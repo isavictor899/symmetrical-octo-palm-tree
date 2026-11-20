@@ -67,19 +67,6 @@ function buildStockRecommendation(drug) {
   };
 }
 
-function stockStatusText(quantity) {
-  const units = Math.round(Number(quantity) || 0);
-  if (units < 0) return `Discrepancy: ${Math.abs(units)} units short`;
-  if (units === 0) return 'Out of stock';
-  return `${units} left`;
-}
-
-function stockStatusClass(quantity) {
-  const units = Math.round(Number(quantity) || 0);
-  if (units <= 0) return 'critical';
-  return 'warning';
-}
-
 function startOfToday() {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
@@ -470,7 +457,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
   ];
 
   return <main className="dashboard">
-    <header className="dashboard-heading"><div><p className="eyebrow">{shopName}</p><h1>Dashboard</h1><p className="dashboard-subtitle">Your pharmacy overview for today.</p></div><time>{new Date().toLocaleDateString('en-KE', { dateStyle: 'full' })}</time></header>
+    <header className="dashboard-heading"><div><h1>Dashboard</h1><p className="dashboard-subtitle">Your pharmacy overview for today.</p></div><time>{new Date().toLocaleDateString('en-KE', { dateStyle: 'full' })}</time></header>
     {allShops.length > 1 && (
       <nav className="shop-switcher" aria-label="Switch shop">
         {allShops.map((s) => (
@@ -488,60 +475,71 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
         ))}
       </nav>
     )}
-    {loadingMore && <div className="loading-more">Loading additional dashboard data…</div>}
-    <section className="quick-actions panel" aria-labelledby="quick-actions-title">
-      <h2 id="quick-actions-title">Quick actions</h2>
-      <div className="quick-action-list">
+    {loadingMore && <div className="loading-more" role="status">Updating shop activity…</div>}
+    <section className="dashboard-actions" aria-labelledby="quick-actions-title">
+      <div className="dashboard-section-heading"><h2 id="quick-actions-title">Quick actions</h2><span>Common tasks</span></div>
+      <div className="dashboard-action-grid">
         {quickActions.map(({ label, page: targetPage, icon: Icon, tone }) => <button key={targetPage} type="button" className="quick-action" onClick={() => onNavigatePage?.(targetPage)}>
           <span className={`quick-action-icon tone-${tone}`}><Icon size={21} stroke={1.8} aria-hidden="true" /></span>
           <span>{label}</span>
         </button>)}
       </div>
     </section>
-    <section className="metrics" aria-label="Today’s sales and stock summary">
-      {metrics.map(({ label, value, icon: Icon, tone }) => <article className="metric-card" key={label}>
-        <div className="metric-heading"><span>{label}</span><span className={`metric-icon tone-${tone}`}><Icon size={20} stroke={1.8} aria-hidden="true" /></span></div>
+    <section className="dashboard-metrics" aria-label="Today’s pharmacy summary">
+      {metrics.map(({ label, value, icon: Icon, tone }) => <article className="dashboard-metric" key={label}>
+        <div><span>{label}</span><i className={`tone-${tone}`}><Icon size={19} stroke={1.8} aria-hidden="true" /></i></div>
         <strong>{value}</strong>
+        <small className={label === 'Expired units' && expiredUnits ? 'metric-danger' : label === 'Low-stock drugs' && lowStock.length ? 'metric-attention' : ''}>
+          {label === 'Net sales today' ? `${todaySales.length} sale${todaySales.length === 1 ? '' : 's'} recorded` : null}
+          {label === 'Transactions' ? 'Today' : null}
+          {label === 'Returns today' ? `${todayReturns.length} return${todayReturns.length === 1 ? '' : 's'} recorded` : null}
+          {label === 'Discounts given' ? `${todayDiscounts.length} discounted line${todayDiscounts.length === 1 ? '' : 's'}` : null}
+          {label === 'Low-stock drugs' ? (lowStock.length ? 'Needs attention' : 'No stock alerts') : null}
+          {label === 'Units received' ? 'Received today' : null}
+          {label === 'Expired units' ? (expiredUnits ? 'Requires review' : 'No expired units') : null}
+          {label === 'Equipment in stock' ? 'Equipment & supplies' : null}
+        </small>
       </article>)}
     </section>
-    <section className="panel recent-transactions">
-      <div className="panel-title-row">
-        <h2>Recent transactions</h2>
-        <span>{todaySales.length} today</span>
-      </div>
-      {!recentTransactions.length ? <p className="muted">No transactions have been recorded today.</p> : (
-        <ul className="transaction-list">
-          {recentTransactions.map((sale) => (
-            <li key={sale.id}>
-              <div className="transaction-main">
-                <strong>{new Date(sale.sold_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}</strong>
-                <small>{paymentLabels[sale.payment_method] || sale.payment_method || 'Payment'} · {currency.format(sale.total_amount)}</small>
-              </div>
-              <div className="transaction-items">
-                {sale.items.map((item) => <span key={item.id}>{item.name} <b>×{item.quantity}</b></span>)}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+    <section className="dashboard-panels" aria-label="Shop activity and stock">
+      <article className="dashboard-panel">
+        <div className="dashboard-section-heading"><div><h2>Stock needing attention</h2><p>Drugs at or below their reorder level</p></div><button className="dashboard-text-action" type="button" onClick={() => onNavigatePage?.('stockedDrugs')}>View stock <IconChartBar size={15} /></button></div>
+        <div className="dashboard-table-wrap"><table><thead><tr><th>Drug</th><th>In stock</th><th>Reorder at</th></tr></thead><tbody>
+          {lowStock.map((drug) => <tr key={drug.id}><td><strong>{drug.name}</strong></td><td><span className="stock-critical">{drug.quantity}</span></td><td>{drug.safetyStock} units</td></tr>)}
+          {!lowStock.length && <tr><td colSpan={3} className="dashboard-empty">All tracked drugs are above their safety level.</td></tr>}
+        </tbody></table></div>
+      </article>
+      <article className="dashboard-panel">
+        <div className="dashboard-section-heading"><div><h2>Recent sales</h2><p>Latest transactions from {shopName || 'this shop'}</p></div><button className="dashboard-text-action" type="button" onClick={() => onNavigatePage?.('sale')}>Open sales <IconChartBar size={15} /></button></div>
+        {!recentTransactions.length ? <p className="muted dashboard-empty-copy">No transactions have been recorded today.</p> : <ul className="dashboard-recent-list">{recentTransactions.slice(0, 5).map((sale) => <li key={sale.id}>
+          <span className="recent-icon"><IconReceipt2 size={16} stroke={1.8} /></span>
+          <span className="recent-description"><strong>Sale {String(sale.id).slice(0, 8).toUpperCase()}</strong><small>{sale.items.map((item) => `${item.name} ×${item.quantity}`).join(' · ')}</small></span>
+          <span className="recent-amount"><strong>{currency.format(sale.total_amount)}</strong><small>{new Date(sale.sold_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })} · {paymentLabels[sale.payment_method] || sale.payment_method || 'Payment'}</small></span>
+        </li>)}</ul>}
+      </article>
+      <article className="dashboard-panel">
+        <div className="dashboard-section-heading"><div><h2>Top-selling products</h2><p>Based on today’s sales</p></div><IconChartBar className="dashboard-heading-icon" /></div>
+        {!topDrugs.length ? <p className="muted dashboard-empty-copy">No product sales recorded today.</p> : <ol className="dashboard-ranked-list">{topDrugs.slice(0, 5).map((drug, index) => <li key={drug.id}><span className="rank">{index + 1}</span><span><strong>{drug.name}</strong><small>{drug.quantity} units sold</small></span><b>{currency.format(drug.revenue)}</b></li>)}</ol>}
+      </article>
+      <article className="dashboard-panel">
+        <div className="dashboard-section-heading"><div><h2>Equipment &amp; supplies</h2><p>Stock held at {shopName || 'this shop'}</p></div><IconMedicalCross className="dashboard-heading-icon" /></div>
+        {!equipmentStock.filter((item) => item.quantity > 0).length ? <p className="muted dashboard-empty-copy">No equipment currently in stock at this shop.</p> : <ul className="dashboard-equipment-list">{equipmentStock.filter((item) => item.quantity > 0).slice(0, 5).map((item) => <li key={item.id}><span><strong>{item.name}</strong><small>{item.category || item.unit}</small></span><b>{item.quantity} {item.unit}</b></li>)}</ul>}
+      </article>
     </section>
-    <section className="dashboard-grid">
-      <article className="panel"><h2>Top-selling products</h2>
-        {!topDrugs.length ? <p className="muted">No sales have been recorded today.</p> : <ol className="ranked-list">{topDrugs.map((drug) => <li key={drug.id}><span><strong>{drug.name}</strong><small>{drug.quantity} units sold</small></span><strong>{currency.format(drug.revenue)}</strong></li>)}</ol>}
+    <section className="dashboard-details" aria-label="More shop details">
+      <article className="dashboard-panel"><h2>Payment methods today</h2>
+        <ul className="dashboard-list">{paymentSummary.map((payment) => <li key={payment.method}><span><strong>{paymentLabels[payment.method]}</strong><small>{payment.count} transaction{payment.count === 1 ? '' : 's'}</small></span><strong>{currency.format(payment.total)}</strong></li>)}</ul>
       </article>
-      <article className="panel"><h2>Stock at or below safety level</h2>
-        {!lowStock.length ? <p className="muted">All tracked products are above their safety level.</p> : <ul className="stock-list">{lowStock.map((drug) => <li key={drug.id}><span><strong>{drug.name}</strong><small>Safety stock: {drug.safetyStock}</small></span><strong className={stockStatusClass(drug.quantity)}>{stockStatusText(drug.quantity)}</strong></li>)}</ul>}
+      <article className="dashboard-panel"><h2>Supplier stock received today</h2>
+        {!supplierReceipts.length ? <p className="muted dashboard-empty-copy">No supplier stock has been received today.</p> : <><div className="received-summary"><span><small>Units received</small><strong>{receivedUnits}</strong></span><span><small>Purchase value</small><strong>{currency.format(receivedCost)}</strong></span></div><ul className="dashboard-list">{supplierReceipts.slice(0, 6).map((movement) => <li key={movement.id}><span><strong>{movement.batches?.drugs?.name || 'Stock receipt'}</strong><small>{movementLabel(movement, sourceShopNames)} · {new Date(movement.created_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}</small></span><strong>{movement.quantity} units</strong></li>)}</ul></>}
       </article>
-      <article className="panel"><h2>Payment methods today</h2>
-        <ul className="payment-list">{paymentSummary.map((payment) => <li key={payment.method}><span><strong>{paymentLabels[payment.method]}</strong><small>{payment.count} transaction{payment.count === 1 ? '' : 's'}</small></span><strong>{currency.format(payment.total)}</strong></li>)}</ul>
-      </article>
-      <article className="panel"><h2>Discounts given today</h2>
+      <article className="dashboard-panel"><h2>Discounts given today</h2>
         {!todayDiscounts.length ? <p className="muted">No discounts have been given today.</p> : <>
           <div className="received-summary">
             <span><small>Discounted lines</small><strong>{todayDiscounts.length}</strong></span>
             <span><small>Value given</small><strong>{currency.format(discountTotal)}</strong></span>
           </div>
-          <ul className="stock-list">{todayDiscounts.slice(0, 8).map((row) => (
+          <ul className="dashboard-list">{todayDiscounts.slice(0, 6).map((row) => (
             <li key={row.id}>
               <span>
                 <strong>{row.name}</strong>
@@ -552,17 +550,11 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
           ))}</ul>
         </>}
       </article>
-      <article className="panel"><h2>Supplier stock received today</h2>
-        {!supplierReceipts.length ? <p className="muted">No supplier stock has been received today.</p> : <><div className="received-summary"><span><small>Units received</small><strong>{receivedUnits}</strong></span><span><small>Purchase value</small><strong>{currency.format(receivedCost)}</strong></span></div><ul className="stock-list">{supplierReceipts.map((movement) => <li key={movement.id}><span><strong>{movement.batches?.drugs?.name || 'Stock receipt'}</strong><small>{movementLabel(movement, sourceShopNames)} · {new Date(movement.created_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}</small></span><strong>{movement.quantity} units</strong></li>)}</ul></>}
+      <article className="dashboard-panel"><div className="dashboard-section-heading"><div><h2>Expired stock for write-off</h2><p>Expired batches with units remaining</p></div><button className="dashboard-text-action" type="button" onClick={() => onNavigatePage?.('expiryReport')}>Review expiry <IconCalendarExclamation size={15} /></button></div>
+        {!expiredStock.length ? <p className="muted dashboard-empty-copy">No expired stock is currently on hand.</p> : <ul className="dashboard-list">{expiredStock.slice(0, 6).map((batch) => <li key={batch.id}><span><strong>{batch.drugs?.name || 'Expired drug'}</strong><small>Batch {batch.batch_number || 'No batch'} · Expired {new Date(batch.expiry_date).toLocaleDateString('en-KE')}</small></span><strong className="critical">{batch.quantity_remaining} units</strong></li>)}</ul>}
       </article>
-      <article className="panel"><h2>Medical equipment and supplies</h2>
-        {!equipmentStock.length ? <p className="muted">No equipment stock has been recorded for this shop.</p> : <ul className="stock-list">{equipmentStock.map((item) => <li key={item.id}><span><strong>{item.name}</strong><small>{item.category || item.unit} · Average cost {currency.format(item.averageCost)} · Selling price {currency.format(item.sellingPrice)}</small></span><strong>{item.quantity} {item.unit}</strong></li>)}</ul>}
-      </article>
-      <article className="panel"><h2>Expired stock requiring write-off</h2>
-        {!expiredStock.length ? <p className="muted">No expired stock is currently on hand.</p> : <ul className="stock-list">{expiredStock.slice(0, 8).map((batch) => <li key={batch.id}><span><strong>{batch.drugs?.name || 'Expired drug'}</strong><small>Batch {batch.batch_number || 'No batch'} · Expired {new Date(batch.expiry_date).toLocaleDateString('en-KE')}</small></span><strong className="critical">{batch.quantity_remaining} units</strong></li>)}</ul>}
-      </article>
-      <article className="panel recommendations"><h2>Recommendations</h2>
-        {!recommendations.length ? <p className="muted">No low-stock recommendations for this shop.</p> : <ul className="stock-list recommendation-list">{recommendations.map((insight) => {
+      <article className="dashboard-panel dashboard-recommendations"><div className="dashboard-section-heading"><div><h2>Stock recommendations</h2><p>Actions from this shop’s current stock position</p></div></div>
+        {!recommendations.length ? <p className="muted dashboard-empty-copy">No low-stock recommendations for this shop.</p> : <ul className="dashboard-list recommendation-list">{recommendations.map((insight) => {
           const parsedInsight = parseInsightMessage(insight.message);
           return <li key={insight.id}>
             <span>
