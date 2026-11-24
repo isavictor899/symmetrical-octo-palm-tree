@@ -88,6 +88,7 @@ const pages = {
   receive: { label: 'Receive stock', icon: 'receive', component: ReceiveStock, group: 'Inventory' },
   purchaseOrders: { label: 'Purchase orders', icon: 'purchaseOrders', component: PurchaseOrders, group: 'Inventory' },
   financeExpenses: { label: 'Expenses', icon: 'finance', component: Finance, group: 'Finance', props: { section: 'expenses' } },
+  supplierDebts: { label: 'Supplier debts', icon: 'finance', component: Finance, group: 'Finance', props: { section: 'debts' } },
   financeIncome: { label: 'Income', icon: 'finance', component: Finance, group: 'Finance', props: { section: 'income' } },
   cashRegister: { label: 'Cash register', icon: 'register', component: Finance, group: 'Finance', props: { section: 'register' } },
   financeTransactions: { label: 'Transactions', icon: 'finance', component: Finance, group: 'Finance', props: { section: 'transactions' } },
@@ -265,7 +266,7 @@ export default function App() {
 
   const availablePages = Object.entries(pages).filter(([key]) => {
     if ((key === 'dashboard' || key === 'monthlyReport' || key === 'financeExpenses' || key === 'financeIncome' || key === 'financeTransactions' || key.endsWith('Report') || key === 'profitLoss') && !isAdminRole(staffRole)) return false;
-    if ((key === 'receive' || key === 'purchaseOrders') && !canReceiveStock(staffRole)) return false;
+    if ((key === 'receive' || key === 'purchaseOrders' || key === 'supplierDebts') && !canReceiveStock(staffRole)) return false;
     if (key === 'stockedDrugs' && !canManageStockedDrugs(staffRole)) return false;
     return true;
   });

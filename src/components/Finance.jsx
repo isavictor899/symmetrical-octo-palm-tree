@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { isAdminRole } from '../lib/roles';
+import { canReceiveStock, isAdminRole } from '../lib/roles';
 import './Finance.css';
 
 const money = new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 2 });
 const paymentLabels = { cash: 'Cash', mpesa: 'M-Pesa', card: 'Card', bank: 'Bank', other: 'Other' };
 const titles = {
   expenses: ['Expenses', 'Paid supplier stock and the operating costs you record.'],
+  debts: ['Supplier debts', 'Unpaid supplier receipts for this shop. Record payment here when settled.'],
   income: ['Income', 'Sales revenue plus other income recorded by the owner.'],
   transactions: ['Financial transactions', 'A complete, shop-specific cash-flow trail.'],
   register: ['Cash register', 'Open your drawer, count it at close, and record the difference.'],
@@ -19,6 +20,8 @@ function startOfMonth() {
 
 export default function Finance({ section = 'transactions', activeShopId, activeShopName, staffRole, isActive = true, dataVersion = 0 }) {
   const [rows, setRows] = useState([]);
+  const [debts, setDebts] = useState([]);
+  const [debtPaymentMethod, setDebtPaymentMethod] = useState('cash');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -32,6 +35,7 @@ export default function Finance({ section = 'transactions', activeShopId, active
   const title = titles[section] || titles.transactions;
   const kind = section === 'expenses' ? 'expense' : section === 'income' ? 'income' : 'all';
   const canManage = isAdminRole(staffRole);
+  const canPayDebts = canReceiveStock(staffRole);
 
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -80,9 +84,22 @@ export default function Finance({ section = 'transactions', activeShopId, active
     } finally { setLoading(false); }
   }
 
+  async function loadDebts() {
+    if (!activeShopId || !isActive) return;
+    setLoading(true);
+    try {
+      const { data, error: requestError } = await supabase.rpc('supplier_debt_list', { p_shop_id: activeShopId });
+      if (requestError) throw requestError;
+      setDebts(Array.isArray(data) ? data : []);
+      setError('');
+    } catch (loadError) {
+      setError(loadError.message || 'Could not load supplier debts. Apply the supplier debts migration and try again.');
+    } finally { setLoading(false); }
+  }
+
   useEffect(() => {
-    setRows([]); setRegister(null); setError(''); setMessage(''); setSearch('');
-    if (section === 'register') loadRegister(); else loadTransactions();
+    setRows([]); setDebts([]); setRegister(null); setError(''); setMessage(''); setSearch('');
+    if (section === 'register') loadRegister(); else if (section === 'debts') loadDebts(); else loadTransactions();
   }, [activeShopId, section, kind, isActive, dataVersion]);
 
   async function createEntry(event) {
@@ -137,6 +154,19 @@ export default function Finance({ section = 'transactions', activeShopId, active
     finally { setSaving(false); }
   }
 
+  async function payDebt(debt) {
+    if (saving || !canPayDebts) return;
+    setSaving(true); setError(''); setMessage('');
+    try {
+      const { error: payError } = await supabase.rpc('pay_supplier_debt', { p_debt_id: debt.id, p_payment_method: debtPaymentMethod });
+      if (payError) throw payError;
+      setMessage(`${debt.supplier_name} payment recorded as an expense.`);
+      await loadDebts();
+      window.dispatchEvent(new CustomEvent('pharmacy-pos:data-changed', { detail: { type: 'finance', shopId: activeShopId } }));
+    } catch (payError) { setError(payError.message || 'Could not record supplier payment.'); }
+    finally { setSaving(false); }
+  }
+
   if (!activeShopId) return <main className="finance-page"><p className="empty-state">Select a shop to view finance.</p></main>;
 
   if (section === 'register') return <main className="finance-page">
@@ -146,6 +176,15 @@ export default function Finance({ section = 'transactions', activeShopId, active
       <div className="register-ledger"><span>Open since</span><strong>{new Date(register.opened_at).toLocaleString('en-KE')}</strong><span>Opening float</span><strong className="tnum">{money.format(Number(register.opening_float || 0))}</strong><span>Expected cash</span><strong className="tnum register-total">{money.format(Number(register.expected_cash || 0))}</strong><p>Expected cash includes cash sales, cash refunds, and cash finance entries recorded after this drawer was opened.</p></div>
       <form className="finance-form" onSubmit={closeRegister}><h2>Close register</h2><label>Counted cash (KES)<input autoFocus required min="0" step="0.01" type="number" value={countedCash} onChange={(event) => setCountedCash(event.target.value)} /></label><label>Closing note <span>optional</span><textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Explain a difference or handover." /></label><button className="finance-primary" disabled={saving}>{saving ? 'Closing…' : 'Close and reconcile'}</button></form>
     </section> : <section className="register-layout"><div className="register-ledger"><span>Before you start</span><strong>Open a cash drawer</strong><p>Enter the physical cash left in the drawer. The system will track cash activity from this point until you close it.</p></div><form className="finance-form" onSubmit={openRegister}><h2>Start shift</h2><label>Opening cash (KES)<input autoFocus required min="0" step="0.01" type="number" value={openingFloat} onChange={(event) => setOpeningFloat(event.target.value)} /></label><button className="finance-primary" disabled={saving}>{saving ? 'Opening…' : 'Open cash register'}</button></form></section>}
+  </main>;
+
+  if (section === 'debts') return <main className="finance-page">
+    <header className="finance-header"><div><h1>{title[0]}</h1><p>{title[1]} {activeShopName ? `Showing ${activeShopName}.` : ''}</p></div></header>
+    {error && <p className="finance-notice danger" role="alert">{error}</p>}{message && <p className="finance-notice success">{message}</p>}
+    {!canPayDebts && <p className="finance-access-note">Only a pharmacist or administrator can record supplier payments.</p>}
+    <section className="finance-list"><div className="finance-list-head"><h2>Unpaid receipts</h2><label className="finance-search">Payment method<select value={debtPaymentMethod} onChange={(event) => setDebtPaymentMethod(event.target.value)}>{Object.entries(paymentLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
+      {loading ? <p className="empty-state">Loading supplier debts…</p> : debts.length === 0 ? <p className="empty-state">No unpaid supplier receipts for this shop.</p> : <div className="table-wrap"><table><thead><tr><th>Received</th><th>Supplier</th><th>Drug / batch</th><th>Quantity</th><th>Amount due</th><th>Action</th></tr></thead><tbody>{debts.map((debt) => <tr key={debt.id}><td>{new Date(debt.received_at).toLocaleDateString('en-KE')}</td><td><strong>{debt.supplier_name}</strong></td><td>{debt.drug_name}{debt.batch_number ? ` · ${debt.batch_number}` : ''}</td><td>{debt.quantity}</td><td className="amount negative">{money.format(Number(debt.amount || 0))}</td><td><button className="finance-primary" type="button" disabled={saving || !canPayDebts} onClick={() => payDebt(debt)}>{saving ? 'Saving…' : 'Mark paid'}</button></td></tr>)}</tbody></table></div>}
+    </section>
   </main>;
 
   return <main className="finance-page">

@@ -107,6 +107,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
   const [lowStock, setLowStock] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
   const [receivedStock, setReceivedStock] = useState([]);
+  const [supplierDebtSummary, setSupplierDebtSummary] = useState({ amount: 0, count: 0 });
   const [sourceShopNames, setSourceShopNames] = useState({});
   const [expiredStock, setExpiredStock] = useState([]);
   const [equipmentStock, setEquipmentStock] = useState([]);
@@ -217,7 +218,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
         // Phase 2: load less-critical / heavier datasets in the background.
         setLoadingMore(true);
         try {
-          const [itemsResult, batchesResult, policyResult, receivedResult, equipmentResult, equipmentSalesResult, returnsResult, discountsResult] = await Promise.all([
+          const [itemsResult, batchesResult, policyResult, receivedResult, equipmentResult, equipmentSalesResult, returnsResult, discountsResult, debtSummaryResult] = await Promise.all([
             supabase.from('sale_items').select('id, sale_id, drug_id, quantity, unit_price, drugs(name), sales!inner(id, shop_id, sold_at, total_amount, payment_method)')
               .eq('sales.shop_id', selectedShopId).gte('sales.sold_at', today),
             supabase.from('batches').select('id, drug_id, batch_number, expiry_date, quantity_remaining, drugs(name)')
@@ -241,6 +242,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
               .select('sale_item_id, original_unit_price, discount_amount, discount_percent, discounted_by, discounted_by_name, discounted_by_role, created_at, sale_items!inner(quantity, drugs(name))')
               .eq('shop_id', selectedShopId).gte('created_at', today).gt('discount_amount', 0)
               .order('created_at', { ascending: false }),
+            supabase.rpc('supplier_debt_summary', { p_shop_id: selectedShopId }),
           ]);
           for (const result of [itemsResult, batchesResult, policyResult]) {
             if (result.error) throw result.error;
@@ -254,6 +256,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
             // the rest of the dashboard.
             console.warn('Discount summary unavailable:', discountsResult.error.message);
           }
+          if (debtSummaryResult.error) throw debtSummaryResult.error;
 
           let receivedRows = receivedResult.data || [];
           let sourceNames = {};
@@ -366,6 +369,7 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
             setRecommendations(lowStockRows.map(buildStockRecommendation));
             setReceivedStock(receivedRows);
             setSourceShopNames(sourceNames);
+            setSupplierDebtSummary(debtSummaryResult.data || { amount: 0, count: 0 });
             setExpiredStock(expiredRows);
             setEquipmentStock((equipmentResult.data || []).map((row) => ({
               id: row.equipment_supply_id,
@@ -412,13 +416,10 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
     const refunds = todayReturns.filter((row) => row.refund_method === method);
     return { method, count: sales.length, total: sales.reduce((sum, sale) => sum + Number(sale.total_amount), 0) - refunds.reduce((sum, row) => sum + Number(row.total_amount || 0), 0) };
   }), [todaySales, todayReturns]);
-  const supplierReceipts = useMemo(
-    () => receivedStock.filter((movement) => movement.movement_type === 'received'),
-    [receivedStock]
-  );
+  const supplierReceipts = useMemo(() => receivedStock.filter((movement) => movement.movement_type === 'received'), [receivedStock]);
   const receivedUnits = useMemo(
-    () => supplierReceipts.reduce((total, movement) => total + Number(movement.quantity || 0), 0),
-    [supplierReceipts]
+    () => receivedStock.reduce((total, movement) => total + Number(movement.quantity || 0), 0),
+    [receivedStock]
   );
   const receivedCost = useMemo(
     () => supplierReceipts.reduce((total, movement) => total + Number(movement.quantity || 0) * Number(movement.batches?.cost_price || 0), 0),
@@ -530,8 +531,11 @@ export default function Dashboard({ activeShopId, activeShopName, organizationSh
       <article className="dashboard-panel"><h2>Payment methods today</h2>
         <ul className="dashboard-list">{paymentSummary.map((payment) => <li key={payment.method}><span><strong>{paymentLabels[payment.method]}</strong><small>{payment.count} transaction{payment.count === 1 ? '' : 's'}</small></span><strong>{currency.format(payment.total)}</strong></li>)}</ul>
       </article>
-      <article className="dashboard-panel"><h2>Supplier stock received today</h2>
-        {!supplierReceipts.length ? <p className="muted dashboard-empty-copy">No supplier stock has been received today.</p> : <><div className="received-summary"><span><small>Units received</small><strong>{receivedUnits}</strong></span><span><small>Purchase value</small><strong>{currency.format(receivedCost)}</strong></span></div><ul className="dashboard-list">{supplierReceipts.slice(0, 6).map((movement) => <li key={movement.id}><span><strong>{movement.batches?.drugs?.name || 'Stock receipt'}</strong><small>{movementLabel(movement, sourceShopNames)} · {new Date(movement.created_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}</small></span><strong>{movement.quantity} units</strong></li>)}</ul></>}
+      <article className="dashboard-panel"><div className="dashboard-section-heading"><div><h2>Supplier debts</h2><p>Unpaid stock receipts at {shopName || 'this shop'}</p></div><button className="dashboard-text-action" type="button" onClick={() => onNavigatePage?.('supplierDebts')}>Review debts <IconChartBar size={15} /></button></div>
+        <div className="received-summary"><span><small>Amount due</small><strong>{currency.format(Number(supplierDebtSummary.amount || 0))}</strong></span><span><small>Unpaid receipts</small><strong>{supplierDebtSummary.count || 0}</strong></span></div>
+      </article>
+      <article className="dashboard-panel"><div className="dashboard-section-heading"><h2>Stock received today</h2><button className="dashboard-text-action" type="button" onClick={() => onNavigatePage?.('supplierDebts')}>Supplier debts <IconChartBar size={15} /></button></div>
+        {!receivedStock.length ? <p className="muted dashboard-empty-copy">No stock has been received today.</p> : <><div className="received-summary"><span><small>Units received</small><strong>{receivedUnits}</strong></span><span><small>Supplier purchase value</small><strong>{currency.format(receivedCost)}</strong></span></div><ul className="dashboard-list">{receivedStock.slice(0, 6).map((movement) => <li key={movement.id}><span><strong>{movement.batches?.drugs?.name || 'Stock receipt'}</strong><small>{movementLabel(movement, sourceShopNames)} · {new Date(movement.created_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}</small></span><strong>{movement.quantity} units</strong></li>)}</ul></>}
       </article>
       <article className="dashboard-panel"><h2>Discounts given today</h2>
         {!todayDiscounts.length ? <p className="muted">No discounts have been given today.</p> : <>

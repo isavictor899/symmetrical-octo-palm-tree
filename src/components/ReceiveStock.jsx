@@ -482,7 +482,7 @@ export default function ReceiveStock({ activeShopId, activeShopName, isActive = 
       <label>Cost price (KES)<input required min="0" step="0.01" type="number" value={form.costPrice} onChange={(event) => update('costPrice', event.target.value)} /></label>
       <label>Selling price (KES)<input required min="0" step="0.01" type="number" value={form.sellingPrice} onChange={(event) => update('sellingPrice', event.target.value)} /></label>
       <label>Quantity received<input required min="1" step="1" type="number" value={form.quantity} onChange={(event) => update('quantity', event.target.value)} /></label>
-      <label className="receipt-payment-choice"><input type="checkbox" checked={form.paidNow} onChange={(event) => update('paidNow', event.target.checked)} /> Supplier was paid now <small>Records the cost as a stock-purchase expense after this receipt syncs.</small></label>
+      <label className="receipt-payment-choice"><input type="checkbox" checked={form.paidNow} onChange={(event) => update('paidNow', event.target.checked)} /> Supplier was paid now <small>{form.paidNow ? 'Records the cost as a stock-purchase expense after this receipt syncs.' : 'Unpaid receipts appear under Supplier debts, where you can record payment later.'}</small></label>
       <button disabled={saving}>{saving ? 'Recording stock…' : 'Receive stock'}</button>
       {error && <p className="error">{error}</p>}{message && <p className="success">{message}</p>}
     </form> : <form onSubmit={submitEquipment}>
