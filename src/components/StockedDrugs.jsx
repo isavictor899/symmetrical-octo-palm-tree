@@ -3,6 +3,7 @@ import { usePowerSync } from '@powersync/react';
 import { useRefreshGate } from '../lib/useRefreshGate';
 import { supabase } from '../lib/supabaseClient';
 import { canManageStockedDrugs, isAdminRole } from '../lib/roles';
+import { todayNairobi } from '../lib/dates';
 
 function formatCurrency(value) {
   const amount = Number(value || 0);
@@ -24,7 +25,7 @@ function classificationClass(value) {
 }
 
 function todayString() {
-  return new Date().toISOString().slice(0, 10);
+  return todayNairobi();
 }
 
 function isExpiredBatch(batch) {
@@ -227,7 +228,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
           const expiredUnits = expiredBatches.reduce((total, batch) => {
             const reserved = Number(pendingSalesQtyByBatch[batch.id] || 0);
             return total + Math.max(0, Number(batch.quantity_remaining || 0) - reserved);
-          }, 0) + pendingReceiptAdjustment;
+          }, 0);
           const availableUnits = availableBatches.reduce((total, batch) => {
             const reserved = Number(pendingSalesQtyByBatch[batch.id] || 0);
             return total + Math.max(0, Number(batch.quantity_remaining || 0) - reserved);
@@ -403,7 +404,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
         expired_units: expiredBatches.reduce((total, batch) => {
           const reserved = Number(pendingSalesQtyByBatch[batch.id] || 0);
           return total + Math.max(0, Number(batch.quantity_remaining || 0) - reserved);
-        }, 0) + pendingReceiptAdjustment,
+        }, 0),
         soonest_expiry: availableBatches[0]?.expiry_date || expiredBatches[0]?.expiry_date || null,
         latest_price: availableBatches.reduce((price, batch) => Number(batch.selling_price || 0) || price, 0),
       };

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
+import { todayNairobi } from '../lib/dates';
 import { useRefreshGate } from '../lib/useRefreshGate';
 import { supabase } from '../lib/supabaseClient';
 import { isAdminRole } from '../lib/roles';
@@ -390,7 +391,7 @@ export default function MonthlyReport({ organizationShops = [], dataVersion = 0,
   const { label } = monthRange(month);
 
   const transferSuggestions = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayNairobi();
     const isUnexpired = (batch) => !batch.expiry_date || String(batch.expiry_date).slice(0, 10) >= today;
     const soldByShopDrug = new Map();
     for (const item of saleItems) {

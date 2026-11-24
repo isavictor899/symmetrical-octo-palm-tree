@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
+import { todayNairobi } from '../lib/dates';
 import { useRefreshGate } from '../lib/useRefreshGate';
 import { supabase } from '../lib/supabaseClient';
 import { isAdminRole } from '../lib/roles';
@@ -73,7 +74,7 @@ function startOfToday() {
 }
 
 function todayDateString() {
-  return new Date().toISOString().slice(0, 10);
+  return todayNairobi();
 }
 
 function isExpiredBatch(batch) {

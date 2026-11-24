@@ -15,6 +15,12 @@ function monthBounds(value) {
   const [year, month] = value.split('-').map(Number);
   return { start: new Date(year, month - 1, 1).toISOString(), end: new Date(year, month, 1).toISOString() };
 }
+
+function lastDayOfMonth(value) {
+  const [year, month] = value.split('-').map(Number);
+  return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+}
+
 function monthValue() { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`; }
 function daysUntil(dateValue) { return Math.ceil((new Date(`${dateValue}T00:00:00`).getTime() - new Date().setHours(0, 0, 0, 0)) / 86400000); }
 
@@ -62,7 +68,7 @@ export default function Reports({ section = 'sales', activeShopId, activeShopNam
           const [salesResult, saleItemsResult, financeResult] = await Promise.all([
             supabase.from('sales').select('id, total_amount, sold_at').eq('shop_id', activeShopId).gte('sold_at', start).lt('sold_at', end),
             supabase.from('sale_items').select('quantity, batches(cost_price), sales!inner(shop_id, sold_at)').eq('sales.shop_id', activeShopId).gte('sales.sold_at', start).lt('sales.sold_at', end),
-            supabase.rpc('finance_transaction_list', { p_shop_id: activeShopId, p_kind: 'expense', p_start: month.concat('-01'), p_end: new Date(new Date(end).getTime() - 86400000).toISOString().slice(0, 10) }),
+            supabase.rpc('finance_transaction_list', { p_shop_id: activeShopId, p_kind: 'expense', p_start: month.concat('-01'), p_end: lastDayOfMonth(month) }),
           ]);
           if (salesResult.error) throw salesResult.error; if (saleItemsResult.error) throw saleItemsResult.error; if (financeResult.error) throw financeResult.error;
           const revenue = (salesResult.data || []).reduce((sum, row) => sum + Number(row.total_amount || 0), 0);

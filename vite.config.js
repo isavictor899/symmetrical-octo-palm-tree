@@ -4,7 +4,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
   preview: {
-    allowedHosts: ['all'],
+    allowedHosts: ['true'],
   },
   plugins: [
     react(),

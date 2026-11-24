@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient';
 import { flushAll } from '../lib/powersync/flush';
 import { canReceiveStock } from '../lib/roles';
 import { useStaff } from '../lib/useStaff';
+import { todayNairobi } from '../lib/dates';
 import './ReceiveStock.css';
 
 const initialForm = {
@@ -14,7 +15,7 @@ const initialForm = {
 export default function ReceiveStock({ activeShopId, activeShopName, isActive = true }) {
   const db = usePowerSync();
   const syncStatus = useStatus();
-  const minExpiryDate = new Date().toISOString().slice(0, 10);
+  const minExpiryDate = todayNairobi();
 
   const { staff: resolvedStaff, error: staffLookupError } = useStaff();
   // Only pharmacists and admins may receive stock.

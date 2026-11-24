@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -101,6 +101,9 @@ Deno.serve(async (request) => {
     const organizationId = (staff.shops as { organization_id?: string } | null)?.organization_id;
     if (!organizationId) return jsonResponse({ error: 'This account is not linked to an organization.' }, 403);
 
+    const { data: allowed } = await supabase.rpc('consume_insight_quota', { p_limit: 10 });
+    if (!allowed) return jsonResponse({ error: 'Daily AI insight limit reached. Try again tomorrow.' }, 429);
+
     const { data: organizationShops, error: shopsError } = await supabase.from('shops')
       .select('id')
       .eq('organization_id', organizationId);
@@ -108,6 +111,16 @@ Deno.serve(async (request) => {
     const allowedShopIds = new Set((organizationShops ?? []).map((shop) => shop.id));
     if (shopIds.some((id) => typeof id !== 'string' || !allowedShopIds.has(id))) {
       return jsonResponse({ error: 'The report includes a shop outside your organization.' }, 403);
+    }
+
+    const { data: dailyInsights, error: insightsError } = await supabase.from('daily_insights_summary')
+      .select('id')
+      .eq('organization_id', organizationId)
+      .eq('report_month', month)
+      .limit(1);
+    if (insightsError) return jsonResponse({ error: 'Unable to verify daily insights.' }, 403);
+    if ((dailyInsights ?? []).length > 0) {
+      return jsonResponse({ error: 'The monthly insight report has already been generated. Please check back later.' }, 429);
     }
 
     const analytics = cleanAnalytics(rawAnalytics as Record<string, unknown>);

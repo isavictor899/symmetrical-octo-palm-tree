@@ -3,6 +3,7 @@ import { usePowerSync, useQuery, useStatus } from '@powersync/react';
 import { supabase } from '../lib/supabaseClient';
 import { flushAll } from '../lib/powersync/flush';
 import { useStaff } from '../lib/useStaff';
+import { todayNairobi } from '../lib/dates';
 import './SaleEntry.css';
 
 function formatKes(n) {
@@ -34,7 +35,7 @@ function printSaleReceipt(receipt, shopName) {
 // one expiring soonest. This is a UX convenience only — sell_stock enforces
 // the real expiry check server-side regardless of what this picks.
 function pickFefoBatch(drug) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayNairobi();
   const sellable = drug.batches.filter((b) => b.available > 0 && b.expiry_date >= today);
   if (sellable.length === 0) return null;
   return [...sellable].sort((a, b) => new Date(a.expiry_date) - new Date(b.expiry_date))[0];
@@ -193,7 +194,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
   const results = useMemo(() => {
     if (!query.trim()) return [];
     const q = query.toLowerCase();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayNairobi();
     return drugs
       .filter((d) => d.name.toLowerCase().includes(q) || (d.generic_name || '').toLowerCase().includes(q))
       .flatMap((drug) => drug.batches
@@ -248,7 +249,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
 
         const drugsById = Object.fromEntries((matchingDrugs || []).map((drug) => [drug.id, drug]));
         const classificationByDrug = Object.fromEntries((shopDrugsResult.data || []).map((row) => [row.drug_id, row.requires_prescription]));
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayNairobi();
         const remoteRows = (batchesResult.data || []).map((batch) => {
           const matchedDrug = drugsById[batch.drug_id] || {};
           const requiresPrescription = classificationByDrug[batch.drug_id];
@@ -409,7 +410,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
   }
 
   function addToCart(drug, batch) {
-    if (!batch || batch.available <= 0 || batch.expiry_date < new Date().toISOString().slice(0, 10)) return;
+    if (!batch || batch.available <= 0 || batch.expiry_date < todayNairobi()) return;
     setCart((prev) => {
       const existing = prev.find((line) => line.kind !== 'equipment' && line.batch.id === batch.id);
       if (existing) {
