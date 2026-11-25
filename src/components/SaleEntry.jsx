@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { usePowerSync, useQuery, useStatus } from '@powersync/react';
 import { supabase } from '../lib/supabaseClient';
 import { flushAll } from '../lib/powersync/flush';
@@ -6,6 +6,8 @@ import { useStaff } from '../lib/useStaff';
 import { todayNairobi } from '../lib/dates';
 import { printReceipt, receiptNumberFor, rememberReceipt } from '../lib/receipt';
 import ReceiptReprint from './ReceiptReprint';
+import { looksLikeBarcode, normalizeBarcode, scanBeep, useBarcodeScanner } from '../lib/barcode';
+import { canReceiveStock } from '../lib/roles';
 import './SaleEntry.css';
 
 function formatKes(n) {
@@ -20,6 +22,18 @@ function pickFefoBatch(drug) {
   const sellable = drug.batches.filter((b) => b.available > 0 && b.expiry_date >= today);
   if (sellable.length === 0) return null;
   return [...sellable].sort((a, b) => new Date(a.expiry_date) - new Date(b.expiry_date))[0];
+}
+
+// For a scan: the soonest-expiring sellable batch that still has stock left
+// after what is already in the cart, so repeated scans move on to the next batch.
+function pickBatchForScan(drug, cart) {
+  const today = todayNairobi();
+  const inCart = (batchId) => cart
+    .filter((line) => line.kind !== 'equipment' && line.batch.id === batchId)
+    .reduce((sum, line) => sum + line.qty, 0);
+  return [...drug.batches]
+    .filter((batch) => batch.expiry_date >= today && batch.available - inCart(batch.id) > 0)
+    .sort((a, b) => new Date(a.expiry_date) - new Date(b.expiry_date))[0] || null;
 }
 
 export default function SaleEntry({ activeShopId, activeShopName, activeShop = null, staffName = '', isActive = true, mode = 'sale', initialSearch = '' }) {
@@ -43,7 +57,11 @@ export default function SaleEntry({ activeShopId, activeShopName, activeShop = n
     setReturnRequestId(null);
     setReturnMessage('');
     setReturnError('');
+    setUnknownBarcode(null);
+    setScanNotice(null);
   }, [effectiveShopId]);
+
+  useEffect(() => () => window.clearTimeout(scanNoticeTimerRef.current), []);
 
   // Reactive local query: joins batches + drugs from the local SQLite
   // database, scoped to this shop. Automatically re-runs whenever the
@@ -155,7 +173,15 @@ export default function SaleEntry({ activeShopId, activeShopName, activeShop = n
   const [checkoutError, setCheckoutError] = useState(null);
   const [lastReceipt, setLastReceipt] = useState(null);
   const [showReprint, setShowReprint] = useState(false);
-  const [printNotice, setPrintNotice] = useState('');
+  const [scanNotice, setScanNotice] = useState(null); // { ok, text }
+  const [unknownBarcode, setUnknownBarcode] = useState(null);
+  const [linkSearch, setLinkSearch] = useState('');
+  const [linking, setLinking] = useState(false);
+  const [linkError, setLinkError] = useState('');
+  // Barcodes resolved or linked during this session, so a second scan is
+  // instant even before the new link has synced to this device.
+  const scannedBarcodesRef = useRef(new Map());
+  const scanNoticeTimerRef = useRef(null);
   const [returnSearch, setReturnSearch] = useState('');
   const [returnRows, setReturnRows] = useState([]);
   const [selectedReturnItem, setSelectedReturnItem] = useState(null);
@@ -418,6 +444,105 @@ export default function SaleEntry({ activeShopId, activeShopName, activeShop = n
     setQuery('');
   }
 
+    function showScanNotice(ok, text) {
+    window.clearTimeout(scanNoticeTimerRef.current);
+    setScanNotice({ ok, text });
+    scanNoticeTimerRef.current = window.setTimeout(() => setScanNotice(null), ok ? 2500 : 6000);
+  }
+
+  // Adds the scanned drug to the cart using the soonest-expiring batch.
+  async function addScannedDrug(drugId, verb = 'Added') {
+    const drug = drugs.find((item) => item.id === drugId);
+    if (!drug) {
+      let name = 'This product';
+      try {
+        const rows = await db.getAll('SELECT name FROM drugs WHERE id = ?', [drugId]);
+        if (rows[0]?.name) name = rows[0].name;
+      } catch {
+        // Name is only for the message.
+      }
+      showScanNotice(false, `${name} is not in stock at this shop.`);
+      scanBeep(false);
+      return;
+    }
+    const batch = pickBatchForScan(drug, cart);
+    if (!batch) {
+      showScanNotice(false, `${drug.name}: no more sellable stock (sold out or expired).`);
+      scanBeep(false);
+      return;
+    }
+    addToCart(drug, batch);
+    showScanNotice(true, `${verb} ${drug.name} (exp ${batch.expiry_date})`);
+    scanBeep(true);
+  }
+
+  async function handleScan(raw) {
+    if (pageMode !== 'sale' || status === 'submitting') return;
+    const code = normalizeBarcode(raw);
+    if (!code) {
+      showScanNotice(false, 'That barcode did not read correctly. Scan it again.');
+      scanBeep(false);
+      return;
+    }
+
+    let drugId = scannedBarcodesRef.current.get(code) || null;
+    if (!drugId) {
+      try {
+        const rows = await db.getAll('SELECT drug_id FROM drug_barcodes WHERE barcode = ? LIMIT 1', [code]);
+        drugId = rows[0]?.drug_id || null;
+      } catch {
+        // Local barcode list not available yet; fall back to the server below.
+      }
+    }
+    if (!drugId && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
+      const { data } = await supabase.from('drug_barcodes').select('drug_id').eq('barcode', code).maybeSingle();
+      drugId = data?.drug_id || null;
+    }
+
+    if (!drugId) {
+      setUnknownBarcode(code);
+      setLinkSearch('');
+      setLinkError('');
+      scanBeep(false);
+      return;
+    }
+    scannedBarcodesRef.current.set(code, drugId);
+    setUnknownBarcode(null);
+    await addScannedDrug(drugId);
+  }
+
+  async function linkUnknownBarcode(drug) {
+    if (!unknownBarcode || linking) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setLinkError('Linking a barcode needs an internet connection. You can still add the drug by searching for it.');
+      return;
+    }
+    setLinking(true);
+    setLinkError('');
+    const { error } = await supabase.rpc('link_drug_barcode', { p_barcode: unknownBarcode, p_drug_id: drug.id });
+    setLinking(false);
+    if (error) {
+      setLinkError(error.message || 'Could not link this barcode.');
+      return;
+    }
+    scannedBarcodesRef.current.set(unknownBarcode, drug.id);
+    setUnknownBarcode(null);
+    await addScannedDrug(drug.id, 'Barcode linked. Added');
+  }
+
+  useBarcodeScanner({ enabled: isActive && pageMode === 'sale', onScan: handleScan });
+
+  const canLinkBarcodes = canReceiveStock(staffInfo?.role);
+  const linkCandidates = useMemo(() => {
+    const term = linkSearch.trim().toLowerCase();
+    if (!unknownBarcode) return [];
+    return drugs
+      .filter((drug) => !term
+        || drug.name?.toLowerCase().includes(term)
+        || drug.generic_name?.toLowerCase().includes(term))
+      .slice(0, 8);
+  }, [drugs, linkSearch, unknownBarcode]);
+  
   function addEquipmentToCart(item) {
     if (!syncStatus.connected || item.available <= 0 || item.selling_price <= 0) return;
     setCart((prev) => {
@@ -652,8 +777,61 @@ export default function SaleEntry({ activeShopId, activeShopName, activeShop = n
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search drugs or medical equipment…"
+            onKeyDown={(e) => {
+              // A scanner typing into the search box ends with Enter.
+              if (e.key === 'Enter' && looksLikeBarcode(query)) {
+                e.preventDefault();
+                const code = query.trim();
+                setQuery('');
+                handleScan(code);
+              }
+            }}
+            placeholder="Search or scan a barcode…"
           />
+
+          {scanNotice ? (
+            <div className={scanNotice.ok ? 'scan-notice ok' : 'scan-notice error'} role="status">{scanNotice.text}</div>
+          ) : null}
+
+          {unknownBarcode ? (
+            <section className="unknown-barcode" aria-label="Unknown barcode">
+              <div className="unknown-barcode-head">
+                <div>
+                  <strong>New barcode: <span className="tnum">{unknownBarcode}</span></strong>
+                  <div className="muted small">
+                    {canLinkBarcodes
+                      ? 'Choose the drug this pack is. Next time it scans straight into the cart.'
+                      : 'This barcode is not linked to a drug yet. Ask a pharmacist or administrator to link it, or search for the drug by name.'}
+                  </div>
+                </div>
+                <button type="button" className="table-action" onClick={() => setUnknownBarcode(null)} disabled={linking}>Dismiss</button>
+              </div>
+              {canLinkBarcodes ? (
+                <>
+                  <input
+                    className="search-input"
+                    value={linkSearch}
+                    onChange={(e) => setLinkSearch(e.target.value)}
+                    placeholder="Find the drug in this shop's stock…"
+                    aria-label="Find the drug to link"
+                  />
+                  {linkError ? <div className="inline-error">{linkError}</div> : null}
+                  <div className="unknown-barcode-list">
+                    {linkCandidates.map((drug) => (
+                      <button key={drug.id} type="button" className="product-row" onClick={() => linkUnknownBarcode(drug)} disabled={linking}>
+                        <div>
+                          <div className="product-title">{drug.name}</div>
+                          <div className="product-meta">{drug.generic_name || 'No generic name'}</div>
+                        </div>
+                        <div className="product-price"><small>{linking ? 'Linking…' : 'Link and add'}</small></div>
+                      </button>
+                    ))}
+                    {linkCandidates.length === 0 ? <div className="empty-state">No stocked drug matches. Receive the drug first, then link its barcode.</div> : null}
+                  </div>
+                </>
+              ) : null}
+            </section>
+          ) : null}
 
           {query.trim() && results.length === 0 && equipmentResults.length === 0 && remoteSearchLoading && (
             <div className="empty-state">Searching stock while the local catalogue syncs…</div>

@@ -4,6 +4,7 @@ import { useRefreshGate } from '../lib/useRefreshGate';
 import { supabase } from '../lib/supabaseClient';
 import { canManageStockedDrugs, isAdminRole } from '../lib/roles';
 import { todayNairobi } from '../lib/dates';
+import { normalizeBarcode } from '../lib/barcode';
 
 function formatCurrency(value) {
   const amount = Number(value || 0);
@@ -136,6 +137,11 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
   const [savingCount, setSavingCount] = useState(false);
   const [pendingSalesByBatch, setPendingSalesByBatch] = useState({});
   const [lastCountByBatch, setLastCountByBatch] = useState({});
+  const [barcodesByDrug, setBarcodesByDrug] = useState({});
+  const [barcodeInput, setBarcodeInput] = useState('');
+  const [barcodeBusy, setBarcodeBusy] = useState(false);
+  const [barcodeMessage, setBarcodeMessage] = useState(null); // { ok, text }
+
 
   const selectedShop = allShops.find((shop) => shop.id === selectedShopId);
   const destinationShops = useMemo(
@@ -454,6 +460,63 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
     }));
   }
 
+    // Barcodes are per organization; RLS returns only this organization's.
+  async function loadBarcodes() {
+    const { data, error: barcodeError } = await supabase.from('drug_barcodes').select('barcode, drug_id').order('barcode');
+    if (barcodeError) return;
+    const map = {};
+    for (const row of data || []) {
+      if (!map[row.drug_id]) map[row.drug_id] = [];
+      map[row.drug_id].push(row.barcode);
+    }
+    setBarcodesByDrug(map);
+  }
+
+  useEffect(() => {
+    if (gate) loadBarcodes();
+  }, [gate]);
+
+  function toggleBatches(drugId) {
+    setExpandedBatchDrugId((current) => (current === drugId ? null : drugId));
+    setBarcodeInput('');
+    setBarcodeMessage(null);
+  }
+
+  async function linkBarcode(event, item) {
+    event.preventDefault();
+    if (barcodeBusy) return;
+    const code = normalizeBarcode(barcodeInput);
+    if (!code) {
+      setBarcodeMessage({ ok: false, text: 'That barcode did not read correctly. Scan it again.' });
+      return;
+    }
+    setBarcodeBusy(true);
+    setBarcodeMessage(null);
+    const { error: linkError } = await supabase.rpc('link_drug_barcode', { p_barcode: code, p_drug_id: item.drug_id });
+    setBarcodeBusy(false);
+    if (linkError) {
+      setBarcodeMessage({ ok: false, text: linkError.message || 'Could not link the barcode.' });
+      return;
+    }
+    setBarcodeInput('');
+    setBarcodeMessage({ ok: true, text: `Barcode ${code} linked to ${item.name}.` });
+    await loadBarcodes();
+  }
+
+  async function unlinkBarcode(code, item) {
+    if (barcodeBusy) return;
+    setBarcodeBusy(true);
+    setBarcodeMessage(null);
+    const { error: unlinkError } = await supabase.rpc('unlink_drug_barcode', { p_barcode: code });
+    setBarcodeBusy(false);
+    if (unlinkError) {
+      setBarcodeMessage({ ok: false, text: unlinkError.message || 'Could not remove the barcode.' });
+      return;
+    }
+    setBarcodeMessage({ ok: true, text: `Barcode ${code} removed from ${item.name}.` });
+    await loadBarcodes();
+  }
+
   function openCountDialog(item) {
     // One client ID per batch per dialog: a retry after a network drop is recorded once, not twice.
     const entries = {};
@@ -704,10 +767,9 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
                         <button
                           type="button"
                           className="table-action"
-                          onClick={() => setExpandedBatchDrugId((current) => current === item.drug_id ? null : item.drug_id)}
-                          disabled={item.batches.length === 0}
+                          onClick={() => toggleBatches(item.drug_id)}
                         >
-                          {expandedBatchDrugId === item.drug_id ? 'Hide batches' : 'Show batches'}
+                          {expandedBatchDrugId === item.drug_id ? 'Hide details' : 'Batches & barcodes'}
                         </button>
                         <button
                           type="button"
@@ -743,6 +805,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
                     <tr className="batch-detail-row">
                       <td colSpan="7">
                         <div className="batch-stack">
+                          {item.batches.length === 0 ? <span className="muted small">No stock on hand.</span> : null}
                           {item.batches.map((batch) => (
                             <div key={batch.id} className={isExpiredBatch(batch) ? 'batch-chip expired' : 'batch-chip'}>
                               <span>Batch {batch.batch_number || 'N/A'}</span>
@@ -758,6 +821,35 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
                               </span>
                             </div>
                           ))}
+                        </div>
+                        <div className="barcode-panel">
+                          <div className="barcode-panel-list">
+                            <strong>Barcodes</strong>
+                            {(barcodesByDrug[item.drug_id] || []).length === 0 ? (
+                              <span className="muted small">None yet. Scan a pack to link it.</span>
+                            ) : (barcodesByDrug[item.drug_id] || []).map((code) => (
+                              <span key={code} className="barcode-chip">
+                                <span className="tnum">{code}</span>
+                                <button type="button" onClick={() => unlinkBarcode(code, item)} disabled={barcodeBusy} aria-label={`Remove barcode ${code}`}>×</button>
+                              </span>
+                            ))}
+                          </div>
+                          <form className="barcode-panel-form" onSubmit={(event) => linkBarcode(event, item)}>
+                            <input
+                              value={barcodeInput}
+                              onChange={(event) => setBarcodeInput(event.target.value)}
+                              placeholder="Scan or type a barcode"
+                              aria-label={`Barcode to link to ${item.name}`}
+                              inputMode="numeric"
+                              autoComplete="off"
+                            />
+                            <button type="submit" className="table-action" disabled={barcodeBusy || !barcodeInput.trim()}>
+                              {barcodeBusy ? 'Saving…' : 'Link barcode'}
+                            </button>
+                          </form>
+                          {barcodeMessage ? (
+                            <div className={barcodeMessage.ok ? 'muted small' : 'muted small critical'} role="status">{barcodeMessage.text}</div>
+                          ) : null}
                         </div>
                       </td>
                     </tr>

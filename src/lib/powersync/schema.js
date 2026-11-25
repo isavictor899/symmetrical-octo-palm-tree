@@ -95,6 +95,13 @@ const shop_drugs = new Table({
   added_at: column.text,
 });
 
+// Product barcodes for this organization (synced read-only; written through
+// the link_drug_barcode / unlink_drug_barcode functions).
+const drug_barcodes = new Table({
+  organization_id: column.text,
+  barcode: column.text,
+  drug_id: column.text,
+}, { indexes: { barcode: ['barcode'] } });
 
 export const AppSchema = new Schema({
   drugs,
@@ -105,4 +112,5 @@ export const AppSchema = new Schema({
   pending_sales,
   pending_receipts,
   shop_drugs,
+  drug_barcodes,
 });

@@ -523,6 +523,15 @@ textarea { resize: vertical; }
 .stock-count-modal input[type="text"] { width: 100%; min-width: 9rem; }
 
 
+/* Barcodes on the Stocked drugs page */
+.barcode-panel { display: grid; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.barcode-panel-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.8125rem; }
+.barcode-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); }
+.barcode-chip button { min-height: 0; padding: 0 6px; border: 0; color: var(--text-muted); background: transparent; font-size: 1rem; line-height: 1.2; cursor: pointer; }
+.barcode-chip button:hover:not(:disabled) { color: var(--danger); }
+.barcode-panel-form { display: flex; flex-wrap: wrap; gap: 8px; }
+.barcode-panel-form input { flex: 1 1 200px; max-width: 320px; }
+
 
 
 
