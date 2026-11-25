@@ -287,6 +287,25 @@ export function printReceipt(receipt, shop, width = resolveReceiptWidth(shop)) {
   return true;
 }
 
+// Remembers that a test receipt was printed on this device (setup checklist).
+const TEST_PRINT_KEY = 'pharmacy-pos:test-receipt-printed';
+
+export function markTestReceiptPrinted() {
+  try {
+    window.localStorage.setItem(TEST_PRINT_KEY, new Date().toISOString());
+  } catch {
+    // Only used for the setup checklist.
+  }
+}
+
+export function hasPrintedTestReceipt() {
+  try {
+    return Boolean(window.localStorage.getItem(TEST_PRINT_KEY));
+  } catch {
+    return false;
+  }
+}
+
 export function sampleReceipt() {
   return {
     receiptNo: 'TEST0001',

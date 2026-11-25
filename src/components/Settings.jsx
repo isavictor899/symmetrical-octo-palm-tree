@@ -17,6 +17,7 @@ import {
   RECEIPT_WIDTHS,
   sampleReceipt,
   setDeviceReceiptWidth,
+  markTestReceiptPrinted,
 } from '../lib/receipt';
 import './Settings.css';
 
@@ -198,7 +199,7 @@ export default function Settings({ userId, organizationShops = [], activeShopId 
   }
 
   function printTestReceipt() {
-    const ok = printReceipt(sampleReceipt(), deviceShop || { name: 'Test shop' }, effectiveWidth);
+    const ok = printReceipt(sampleReceipt(), deviceShop || { name: 'Test shop' }, effectiveWidth);if (ok) markTestReceiptPrinted();
     setPrinterNotice(ok ? '' : 'Your browser blocked the receipt window. Allow pop-ups for this site, then try again.');
   }
 

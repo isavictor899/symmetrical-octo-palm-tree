@@ -2,7 +2,16 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
+// Build label shown in Help > diagnostic info, so support knows which version
+// a shop is running. Vercel provides the commit; local builds use the date.
+const appBuild = process.env.VERCEL_GIT_COMMIT_SHA
+  ? process.env.VERCEL_GIT_COMMIT_SHA.slice(0, 7)
+  : new Date().toISOString().slice(0, 16).replace('T', ' ');
+
 export default defineConfig({
+  define: {
+    __APP_BUILD__: JSON.stringify(appBuild),
+  },
   preview: {
     allowedHosts: ['true'],
   },

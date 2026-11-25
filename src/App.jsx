@@ -7,6 +7,7 @@ import {
   IconChevronDown,
   IconDashboard,
   IconFileText,
+  IconHelpCircle,
   IconHistory,
   IconKey,
   IconLogout2,
@@ -43,7 +44,7 @@ const Settings = lazy(() => import('./components/Settings'));
 const Finance = lazy(() => import('./components/Finance'));
 const Reports = lazy(() => import('./components/Reports'));
 const StaffManagement = lazy(() => import('./components/StaffManagement'));
-
+const Help = lazy(() => import('./components/Help'));
 // Shop details every page can use; the receipt fields are printed on receipts.
 const SHOP_LIST_FIELDS = 'id, name, theme_color, location, phone, email, kra_pin, ppb_licence_no, receipt_footer, receipt_paper_width';
 
@@ -61,6 +62,7 @@ function NavIcon({ name }) {
     register: IconCashRegister,
     staff: IconUsers,
     settings: IconSettings,
+    help: IconHelpCircle,
   };
   const Icon = icons[name];
   return Icon ? <Icon size={19} stroke={1.8} aria-hidden="true" focusable="false" /> : null;
@@ -109,6 +111,7 @@ const pages = {
   monthlyReport: { label: 'Monthly intelligence', icon: 'monthlyReport', component: MonthlyReport, group: 'Reports' },
   staff: { label: 'Staff', icon: 'staff', component: StaffManagement, group: 'System' },
   settings: { label: 'Settings', icon: 'settings', component: Settings, group: 'System' },
+  help: { label: 'Help & support', icon: 'help', component: Help, group: 'System' },
 };
 
 export default function App() {
