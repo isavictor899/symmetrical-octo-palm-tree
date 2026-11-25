@@ -1,126 +1,128 @@
 -- =============================================================================
--- Pharmacy POS — database security audit
+-- Pharmacy POS — database security check
 -- =============================================================================
--- Run this in the Supabase Dashboard → SQL Editor.
--- It is read-only. Paste the whole file, run it, and send back the result
--- grids (sections 1, 2, 4, 5, 6 matter most).
+-- Run in Supabase Dashboard → SQL Editor. Read-only.
 --
--- Context: the repository contained no schema for these tables, so the
--- Row Level Security state below has never been reviewed as code.
+-- It is one query, because the SQL Editor only shows the last result of a
+-- script. It returns one row per problem. A clean database returns a single
+-- row: "OK — no findings".
+--
+-- When you add a server function the app should call, add its name to
+-- app_callable below; when a table is meant to be reached only through server
+-- functions, comment it with 'Server-function only: ...' (see migration
+-- 20261125000014).
 -- =============================================================================
 
+with
+app_callable(name) as (
+  -- Server functions signed-in users are meant to call. Anything else that
+  -- they can call is reported (an old version left behind, a helper that
+  -- skips checks). The helpers marked * are used inside row-level policies
+  -- and must stay callable.
+  values
+    ('approve_held_sale'), ('cash_register_current'), ('close_cash_register'),
+    ('consume_insight_quota'), ('create_equipment_supply'), ('create_finance_entry'),
+    ('create_purchase_order'), ('create_shop'), ('create_shop_drug'),
+    ('current_user_is_admin'),          -- *
+    ('finance_actor_can_access'), ('finance_actor_can_manage'),
+    ('finance_transaction_list'), ('get_monthly_insight'), ('held_sales_list'),
+    ('hold_rejected_sale'), ('link_drug_barcode'), ('mark_sales_checked'),
+    ('my_organization_id'),             -- *
+    ('open_cash_register'), ('pay_supplier_debt'), ('purchase_order_actor_can_manage'),
+    ('purchase_order_list'), ('receive_equipment_supply'), ('receive_purchase_order_item'),
+    ('receive_stock'), ('record_purchase_order_receipt_payment'), ('record_stock_count'),
+    ('return_sold_drug'), ('sale_receipts'), ('sales_review_counts'), ('sales_to_check'),
+    ('save_monthly_insight'), ('sell_stock_with_amount_discounts'),
+    ('set_equipment_supply_selling_price'), ('set_shop_drug_prescription_status'),
+    ('supplier_debt_list'), ('supplier_debt_summary'), ('transfer_stock_between_shops'),
+    ('unlink_drug_barcode'), ('update_shop_details'), ('void_held_sale'),
+    ('write_off_expired_stock'), ('get_my_subscription'),
+    -- Enora Labs console: each one checks platform_admins itself.
+    ('platform_is_admin'), ('platform_overview'), ('platform_organizations'),
+    ('platform_organization_detail'), ('platform_set_plan'), ('platform_record_payment'),
+    ('platform_void_payment'), ('platform_set_dates'), ('platform_set_suspended'),
+    ('platform_save_notes')
+),
+public_tables as (
+  select c.oid, c.relname, c.relrowsecurity
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'public' and c.relkind in ('r', 'p')
+),
+public_functions as (
+  select p.oid, p.proname, p.prosecdef, p.proconfig,
+         pg_get_function_identity_arguments(p.oid) as args
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.prokind = 'f'
+),
+findings(severity, section, object, finding) as (
+  -- 1. RLS switched off: the public anon key can read and write the table.
+  select 'CRITICAL', '1 RLS disabled', relname::text, 'Row level security is off'
+    from public_tables where not relrowsecurity
 
--- -----------------------------------------------------------------------------
--- 1. Tables with RLS DISABLED  ← must be empty
---    Any row here means the public anon key can read AND write that table.
--- -----------------------------------------------------------------------------
-select n.nspname as schema, c.relname as table, 'RLS DISABLED' as finding
-from pg_class c
-join pg_namespace n on n.oid = c.relnamespace
-where n.nspname = 'public'
-  and c.relkind in ('r', 'p')
-  and not c.relrowsecurity
-order by c.relname;
+  -- 2. RLS on with no policy, and not marked server-function only: the app
+  --    sees no rows (usually a bug).
+  union all
+  select 'WARN', '2 No policy', t.relname::text, 'RLS on, no policy, not marked server-function only'
+    from public_tables t
+   where t.relrowsecurity
+     and not exists (select 1 from pg_policies p where p.schemaname = 'public' and p.tablename = t.relname)
+     and coalesce(obj_description(t.oid, 'pg_class'), '') not like 'Server-function only%'
 
+  -- 3. Policies open to every row (qual = true) on anything but reference data.
+  union all
+  select 'WARN', '3 Open policy', tablename || '.' || policyname, cmd || ' policy allows every row'
+    from pg_policies
+   where schemaname = 'public'
+     and btrim(coalesce(qual, with_check, '')) = 'true'
+     and tablename not in ('drugs', 'equipment_supplies', 'suppliers')
 
--- -----------------------------------------------------------------------------
--- 2. Tables with RLS ENABLED but NO policy  ← data is invisible to everyone
---    Usually a functional bug, but also means writes silently do nothing.
--- -----------------------------------------------------------------------------
-select c.relname as table, 'RLS enabled, no policy' as finding
-from pg_class c
-join pg_namespace n on n.oid = c.relnamespace
-where n.nspname = 'public'
-  and c.relkind = 'r'
-  and c.relrowsecurity
-  and not exists (
-    select 1 from pg_policies p
-    where p.schemaname = 'public' and p.tablename = c.relname
-  )
-order by c.relname;
+  -- 4. Anything the anon (logged-out) role can touch.
+  union all
+  select 'CRITICAL', '4 Anon table access', table_name::text, 'anon has ' || privilege_type
+    from information_schema.role_table_grants
+   where table_schema = 'public' and grantee = 'anon'
 
+  union all
+  select 'CRITICAL', '5 Anon function access', proname || '(' || args || ')', 'anon can execute'
+    from public_functions
+   where has_function_privilege('anon', oid, 'execute')
 
--- -----------------------------------------------------------------------------
--- 3. Full policy listing — read these carefully.
---    Every business table should scope by shop_id, or by organization_id for
---    administrator access. A policy using `true` is a red flag outside
---    reference/catalogue tables.
--- -----------------------------------------------------------------------------
-select tablename, policyname, cmd, roles::text, qual, with_check
-from pg_policies
-where schemaname = 'public'
-order by tablename, cmd, policyname;
+  -- 6. Signed-in users can call a SECURITY DEFINER function that is not on
+  --    the approved list.
+  union all
+  select 'HIGH', '6 Unexpected callable function', f.proname || '(' || f.args || ')',
+         'signed-in users can execute this SECURITY DEFINER function; it is not in app_callable'
+    from public_functions f
+   where f.prosecdef
+     and has_function_privilege('authenticated', f.oid, 'execute')
+     and f.proname not in (select name from app_callable)
 
+  -- 7. An approved function that exists in more than one version: the old
+  --    one may skip newer checks.
+  union all
+  select 'HIGH', '7 Duplicate callable version', f.proname || '(' || f.args || ')',
+         'another callable version with the same name exists'
+    from public_functions f
+   where has_function_privilege('authenticated', f.oid, 'execute')
+     and (select count(*) from public_functions g
+           where g.proname = f.proname and has_function_privilege('authenticated', g.oid, 'execute')) > 1
 
--- -----------------------------------------------------------------------------
--- 4. What the ANON role can touch  ← must be empty for business tables
---    The anon key ships inside the JS bundle and is public.
--- -----------------------------------------------------------------------------
-select table_name, privilege_type
-from information_schema.role_table_grants
-where table_sc= 'public'
-  and grantee = 'anon'hema 
-order by table_name, privilege_type;
+  -- 8. SECURITY DEFINER without a fixed search_path.
+  union all
+  select 'HIGH', '8 search_path not fixed', proname || '(' || args || ')', 'SECURITY DEFINER without set search_path'
+    from public_functions
+   where prosecdef
+     and not exists (select 1 from unnest(coalesce(proconfig, '{}'::text[])) cfg where cfg like 'search_path=%')
 
-
--- -----------------------------------------------------------------------------
--- 5. RPCs the ANON role can execute  ← should be empty
---    If any of these appear, an unauthenticated visitor can call them.
--- -----------------------------------------------------------------------------
-select p.proname as function,
-       pg_get_function_identity_arguments(p.oid) as arguments
-from pg_proc p
-join pg_namespace n on n.oid = p.pronamespace
-where n.nspname = 'public'
-  and has_function_privilege('anon', p.oid, 'execute')
-order by p.proname;
-
-
--- -----------------------------------------------------------------------------
--- 6. SECURITY DEFINER functions WITHOUT a pinned search_path
---    A mutable search_path on a SECURITY DEFINER function is a privilege
---    escalation vector. Every row here should be fixed with:
---        alter function <fn>(<args>) set search_path = public;
--- -----------------------------------------------------------------------------
-select p.proname as function,
-       pg_get_function_identity_arguments(p.oid) as arguments
-from pg_proc p
-join pg_namespace n on n.oid = p.pronamespace
-where n.nspname = 'public'
-  and p.prosecdef
-  and not exists (
-    select 1 from unnest(coalesce(p.proconfig, '{}'::text[])) cfg
-    where cfg like 'search_path=%'
-  )
-order by p.proname;
-
-
--- -----------------------------------------------------------------------------
--- 7. Tables without a primary key (PowerSync and the outbox both need one)
--- -----------------------------------------------------------------------------
-select c.relname as table, 'no primary key' as finding
-from pg_class c
-join pg_namespace n on n.oid = c.relnamespace
-where n.nspname = 'public'
-  and c.relkind = 'r'
-  and not exists (
-    select 1 from pg_index i
-    where i.indrelid = c.oid and i.indisprimary
-  )
-order by c.relname;
-
-
--- -----------------------------------------------------------------------------
--- 8. Row counts — distinguishes "RLS blocks it" from "the table is empty"
---    when you cross-check section 4.
--- -----------------------------------------------------------------------------
-select 'organizations' as table, count(*) from public.organizations
-union all select 'shops',            count(*) from public.shops
-union all select 'staff',            count(*) from public.staff
-union all select 'drugs',            count(*) from public.drugs
-union all select 'batches',          count(*) from public.batches
-union all select 'shop_drugs',       count(*) from public.shop_drugs
-union all select 'sales',            count(*) from public.sales
-union all select 'sale_items',       count(*) from public.sale_items
-union all select 'stock_movements',  count(*) from public.stock_movements
-order by 1;
+  -- 9. No primary key (PowerSync and the outbox need one).
+  union all
+  select 'WARN', '9 No primary key', t.relname::text, 'table has no primary key'
+    from public_tables t
+   where not exists (select 1 from pg_index i where i.indrelid = t.oid and i.indisprimary)
+)
+select severity, section, object, finding from findings
+union all
+select 'OK', '-', '-', 'OK — no findings' where not exists (select 1 from findings)
+order by 1, 2, 3;

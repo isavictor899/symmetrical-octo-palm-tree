@@ -36,7 +36,10 @@ function pickBatchForScan(drug, cart) {
     .sort((a, b) => new Date(a.expiry_date) - new Date(b.expiry_date))[0] || null;
 }
 
-export default function SaleEntry({ activeShopId, activeShopName, activeShop = null, staffName = '', isActive = true, mode = 'sale', initialSearch = '' }) {
+export default function SaleEntry({ activeShopId, activeShopName, activeShop = null, staffName = '', isActive = true, mode = 'sale', initialSearch = '', subscription = null }) {
+  // Expired past the grace period, or suspended by Enora Labs: the server
+  // refuses new sales, so the till says so instead of queueing them.
+  const salesBlocked = subscription?.state === 'read_only' || subscription?.state === 'suspended';
   const pageMode = mode;
   const db = usePowerSync();
   const syncStatus = useStatus(); // { connected, ... } ” lets us show online/offline
@@ -636,6 +639,10 @@ export default function SaleEntry({ activeShopId, activeShopName, activeShop = n
   // there's connectivity; nothing here calls Supabase directly.
   async function checkout() {
     if (cart.length === 0 || !staffInfo || !effectiveShopId) return;
+    if (salesBlocked) {
+      setCheckoutError('New sales are paused because this pharmacy\'s subscription has expired. Ask your administrator to renew with Enora Labs.');
+      return;
+    }
     if (cartHasUnclassifiedDrug) {
       setCheckoutError('One or more drugs in this sale have not been classified as POM or OTC. Update them in Stocked drugs first.');
       return;
@@ -1018,10 +1025,14 @@ export default function SaleEntry({ activeShopId, activeShopName, activeShop = n
               <div className="inline-error">This sale contains an unclassified stocked drug. Set it to POM or OTC in Stocked drugs before completing the sale.</div>
             )}
 
+            {salesBlocked && (
+              <div className="inline-error">New sales are paused: this pharmacy&apos;s subscription has expired. You can still look up stock and reprint receipts. Ask your administrator to renew.</div>
+            )}
+
             <button
               className="complete-sale"
               onClick={checkout}
-              disabled={cart.length === 0 || status === 'submitting' || cartHasUnclassifiedDrug}
+              disabled={cart.length === 0 || status === 'submitting' || cartHasUnclassifiedDrug || salesBlocked}
             >
               {status === 'submitting' ? 'Recording sale…' : 'Complete sale'}
             </button>

@@ -33,6 +33,11 @@ const FAQ = [
   },
   {
     audience: 'admin',
+    q: 'What happens when our subscription ends?',
+    a: 'You get a reminder at the top of the screen a week before. After the end date everything keeps working for 7 more days. After that the system becomes read-only: you can still see stock, sales, reports and receipts, but new sales and stock are paused until you renew. No data is deleted. Sales a till made offline during that time are kept under Sales review and can be approved after renewal. To renew, contact Enora Labs on 0771 156 353 or info@enoralabs.co.ke.',
+  },
+  {
+    audience: 'admin',
     q: 'What is Sales review?',
     a: 'Held sales are offline sales the server refused when they synced, usually because they were more than 7 days old or the stock records had run out. Approve records the sale and reduces stock; Void drops it with a reason. Sales to check were recorded normally but reached the server late, or were uploaded from a different login than the cashier credited. Compare them with your cash or M-Pesa records, then mark them checked. The bell shows when there is something to review.',
   },

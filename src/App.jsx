@@ -33,6 +33,9 @@ import PageErrorBoundary from './components/PageErrorBoundary';
 import NotificationBell from './components/NotificationBell';
 import ChangePassword from './components/ChangePassword';
 import { clearRecentReceipts } from './lib/receipt';
+import { cachedSubscription, fetchSubscription } from './lib/subscription';
+import { SUPPORT } from './lib/support';
+import SubscriptionBanner from './components/SubscriptionBanner';
 import './App.css';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -47,6 +50,7 @@ const Reports = lazy(() => import('./components/Reports'));
 const StaffManagement = lazy(() => import('./components/StaffManagement'));
 const Help = lazy(() => import('./components/Help'));
 const SalesReview = lazy(() => import('./components/SalesReview'));
+const PlatformConsole = lazy(() => import('./components/platform/PlatformConsole'));
 // Shop details every page can use; the receipt fields are printed on receipts.
 const SHOP_LIST_FIELDS = 'id, name, theme_color, location, phone, email, kra_pin, ppb_licence_no, receipt_footer, receipt_paper_width';
 
@@ -138,6 +142,11 @@ export default function App() {
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [accountInactive, setAccountInactive] = useState(false);
   const [showPasswordChange, setShowPasswordChange] = useState(false);
+  // Enora Labs staff open the platform console instead of the POS. The server
+  // checks platform_admins on every console call; this only picks the screen.
+  const [platformAdmin, setPlatformAdmin] = useState(false);
+  const [platformView, setPlatformView] = useState('console');
+  const [subscription, setSubscription] = useState(null);
   const lastSessionUserId = useRef(null);
   const lastSetupUserId = useRef(null);
   // Loads the shops this user may see. Admins get every shop in their
@@ -201,6 +210,9 @@ export default function App() {
         setMustChangePassword(false);
         setAccountInactive(false);
         setShowPasswordChange(false);
+        setPlatformAdmin(false);
+        setPlatformView('console');
+        setSubscription(null);
         setVisitedPages(new Set(['sale']));
         applyBrandTheme(defaultBrandColor);
         // Signed out — stop syncing AND wipe local data, so a different
@@ -225,11 +237,19 @@ export default function App() {
           .then(() => flushAll(db))
           .catch((err) => console.error('PowerSync connect failed:', err));
 
-        const { data, error } = await supabase
-          .from('staff')
-          .select('role, full_name, shop_id, must_change_password, shops(name, theme_color, organization_id)')
-          .eq('auth_user_id', nextSession.user.id)
-          .maybeSingle();
+        // Show the last known subscription straight away (offline tills).
+        setSubscription(cachedSubscription(nextSession.user.id));
+
+        const [{ data, error }, platformResult] = await Promise.all([
+          supabase
+            .from('staff')
+            .select('role, full_name, shop_id, must_change_password, shops(name, theme_color, organization_id)')
+            .eq('auth_user_id', nextSession.user.id)
+            .maybeSingle(),
+          supabase.rpc('platform_is_admin').then((result) => result, () => ({ data: false })),
+        ]);
+        const isPlatformAdmin = platformResult?.data === true;
+        setPlatformAdmin(isPlatformAdmin);
 
         setStaffRole(data?.role || null);
         setStaffName(data?.full_name || '');
@@ -238,7 +258,9 @@ export default function App() {
         // A successful lookup that finds no staff row means this login was
         // deactivated (or never linked). A failed lookup (e.g. offline) is not
         // treated as deactivated, so an offline till keeps working.
-        setAccountInactive(!error && !data);
+        // An Enora Labs console login usually has no staff row; that is fine.
+        setAccountInactive(!error && !data && !isPlatformAdmin);
+        if (data) fetchSubscription(nextSession.user.id).then(setSubscription);
 
         if (error) {
           console.warn('[App] staff lookup warning:', error.message);
@@ -286,6 +308,21 @@ export default function App() {
     window.addEventListener('pharmacy-pos:shops-changed', handleShopsChanged);
     return () => window.removeEventListener('pharmacy-pos:shops-changed', handleShopsChanged);
   }, []);
+
+  // Pick up a renewal or suspension without signing out.
+  useEffect(() => {
+    const userId = session?.user?.id;
+    if (!userId || !staffRole) return undefined;
+    const refresh = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine !== false) fetchSubscription(userId).then(setSubscription);
+    };
+    const timer = window.setInterval(refresh, 30 * 60 * 1000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [session?.user?.id, staffRole]);
 
   useEffect(() => {
     const handleDataChanged = () => setDataVersion((version) => version + 1);
@@ -394,6 +431,25 @@ export default function App() {
         <Login recoveryMode onRecoveryComplete={() => setRecoveryMode(false)} />
       ) : !session ? (
         <Login />
+      ) : platformAdmin && (platformView === 'console' || !staffRole) ? (
+        <Suspense fallback={<div className="app-loading">Loading console…</div>}>
+          <PlatformConsole email={session.user.email} onOpenPos={staffRole ? () => setPlatformView('pos') : null} />
+        </Suspense>
+      ) : subscription?.state === 'suspended' ? (
+        <div className="login-page">
+          <div className="login-card">
+            <div className="login-brand">
+              <span className="brand-mark"><IconPill size={20} stroke={2} aria-hidden="true" /></span>
+              <span>Pharmacy POS</span>
+            </div>
+            <h1 className="login-title">Account suspended</h1>
+            <p className="login-sub">
+              This pharmacy&apos;s Pharmacy POS account has been suspended{subscription.suspended_reason ? `: ${subscription.suspended_reason}` : '.'}{' '}
+              Your records are safe. To restore access, contact {SUPPORT.company} on {SUPPORT.phoneDisplay} or {SUPPORT.email}.
+            </p>
+            <button type="button" className="login-submit" onClick={() => supabase.auth.signOut()}>Sign out</button>
+          </div>
+        </div>
       ) : accountInactive ? (
         <div className="login-page">
           <div className="login-card">
@@ -478,6 +534,7 @@ export default function App() {
                 <button className="profile-menu-dismiss" type="button" aria-label="Close profile menu" onClick={() => setProfileMenuOpen(false)} />
                 <div className="profile-menu" role="menu">
                   <div className="profile-menu-identity"><strong>{profileName}</strong><small>{session.user.email}</small><span>{profileRole}{activeShop?.name ? ` · ${activeShop.name}` : ''}</span></div>
+                  {platformAdmin ? <button type="button" role="menuitem" className="profile-menu-neutral" onClick={() => { setProfileMenuOpen(false); setPlatformView('console'); }}><IconDashboard size={17} /> Enora Labs console</button> : null}
                   <button type="button" role="menuitem" className="profile-menu-neutral" onClick={() => { setProfileMenuOpen(false); setShowPasswordChange(true); }}><IconKey size={17} /> Change password</button>
                   <button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); supabase.auth.signOut(); }}><IconLogout2 size={17} /> Sign out</button>
                 </div>
@@ -485,6 +542,7 @@ export default function App() {
             </div>
           </header>
           <main className="app-content">
+            <SubscriptionBanner subscription={subscription} isAdmin={isAdminRole(staffRole)} />
             {ActivePageComponent ? (
               <div className="app-page-panel" aria-live="polite">
                 <PageErrorBoundary key={page}>
@@ -502,6 +560,7 @@ export default function App() {
                     onActiveShopChange={setActiveShopId}
                     dataVersion={dataVersion}
                     staffRole={staffRole}
+                    subscription={subscription}
                     isActive
                   />
                 </Suspense>

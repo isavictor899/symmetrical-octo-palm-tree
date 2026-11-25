@@ -532,3 +532,15 @@ textarea { resize: vertical; }
 .barcode-chip button:hover:not(:disabled) { color: var(--danger); }
 .barcode-panel-form { display: flex; flex-wrap: wrap; gap: 8px; }
 .barcode-panel-form input { flex: 1 1 200px; max-width: 320px; }
+
+
+
+
+
+/* Subscription notices across the top of the POS */
+.subscription-banner { margin: 12px 24px 0; padding: 10px 14px; border-radius: var(--radius); font-size: 0.8125rem; line-height: 1.5; }
+.subscription-banner a { color: inherit; font-weight: 700; text-decoration: underline; white-space: nowrap; }
+.subscription-banner.info { color: #1f4f86; background: #e9f1fb; }
+.subscription-banner.warning { color: var(--warning); background: var(--warning-bg); }
+.subscription-banner.danger { color: var(--danger); background: var(--danger-bg); }
+@media (max-width: 720px) { .subscription-banner { margin: 10px 12px 0; } }
