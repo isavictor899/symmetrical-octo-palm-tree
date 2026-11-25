@@ -267,6 +267,7 @@ export default function App() {
   const availablePages = Object.entries(pages).filter(([key]) => {
     if ((key === 'dashboard' || key === 'monthlyReport' || key === 'financeExpenses' || key === 'financeIncome' || key === 'financeTransactions' || key.endsWith('Report') || key === 'profitLoss') && !isAdminRole(staffRole)) return false;
     if ((key === 'receive' || key === 'purchaseOrders' || key === 'supplierDebts') && !canReceiveStock(staffRole)) return false;
+    if (key === 'salesReturns' && !canReceiveStock(staffRole)) return false;
     if (key === 'stockedDrugs' && !canManageStockedDrugs(staffRole)) return false;
     return true;
   });

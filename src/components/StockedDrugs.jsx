@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { Fragment, useEffect, useMemo, useState, useRef } from 'react';
 import { usePowerSync } from '@powersync/react';
 import { useRefreshGate } from '../lib/useRefreshGate';
 import { supabase } from '../lib/supabaseClient';
@@ -34,6 +34,30 @@ function isExpiredBatch(batch) {
 
 function batchOptionLabel(batch) {
   return `${batch.batch_number || 'No batch number'} - exp ${batch.expiry_date} - ${batch.quantity_remaining} units`;
+}
+
+function formatCountDate(value) {
+  if (!value) return 'Never counted';
+  return `Counted ${new Date(value).toLocaleDateString('en-KE', { timeZone: 'Africa/Nairobi' })}`;
+}
+
+function newClientId() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const random = (Math.random() * 16) | 0;
+    return (char === 'x' ? random : (random & 0x3) | 0x8).toString(16);
+  });
+}
+
+function buildLastCountMap(rows = []) {
+  return Object.fromEntries((rows || []).map((row) => [
+    row.batch_id,
+    { countedAt: row.last_counted_at, variance: row.last_variance },
+  ]));
+}
+
+function signedUnits(value) {
+  return `${value > 0 ? '+' : ''}${value}`;
 }
 
 function priceSummary(batches) {
@@ -106,6 +130,12 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
   const [writeOffReason, setWriteOffReason] = useState('');
   const [savingWriteOff, setSavingWriteOff] = useState(false);
   const [expandedBatchDrugId, setExpandedBatchDrugId] = useState(null);
+  const [countDrug, setCountDrug] = useState(null);
+  const [countEntries, setCountEntries] = useState({});
+  const [countError, setCountError] = useState('');
+  const [savingCount, setSavingCount] = useState(false);
+  const [pendingSalesByBatch, setPendingSalesByBatch] = useState({});
+  const [lastCountByBatch, setLastCountByBatch] = useState({});
 
   const selectedShop = allShops.find((shop) => shop.id === selectedShopId);
   const destinationShops = useMemo(
@@ -184,7 +214,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
         if (showingShopRef.current !== selectedShopId) setLoadingStock(true);
         setError('');
 
-        const [shopDrugsResult, batchesResult, equipmentResult, pendingSalesRows, pendingReceiptRows] = await Promise.all([
+        const [shopDrugsResult, batchesResult, equipmentResult, pendingSalesRows, pendingReceiptRows, countsResult] = await Promise.all([
           supabase.from('shop_drugs')
             .select('drug_id, requires_prescription, drugs(name, generic_name, form, strength)')
             .eq('shop_id', selectedShopId)
@@ -200,6 +230,9 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
             .order('equipment_supply_id'),
           db.getAll('SELECT id, items_json FROM pending_sales WHERE status IS NULL OR status = ?', ['pending']),
           db.getAll('SELECT drug_id, quantity FROM pending_receipts WHERE status IS NULL OR status = ?', ['pending']),
+          supabase.from('stock_reconciliation')
+            .select('batch_id, last_counted_at, last_variance')
+            .eq('shop_id', selectedShopId),
         ]);
 
         if (shopDrugsResult.error) throw shopDrugsResult.error;
@@ -252,6 +285,9 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
 
         if (!cancelled) {
           setStockRows(rows);
+          setPendingSalesByBatch(pendingSalesQtyByBatch);
+          // Last-count dates are helpful but not essential; never block the page on them.
+          setLastCountByBatch(countsResult.error ? {} : buildLastCountMap(countsResult.data));
           setEquipmentRows((equipmentResult.data || []).map((row) => ({
             id: row.equipment_supply_id,
             name: row.equipment_supplies?.name || 'Unknown equipment',
@@ -378,6 +414,13 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
     const pendingSalesRows = await db.getAll('SELECT id, items_json FROM pending_sales WHERE status IS NULL OR status = ?', ['pending']);
     const pendingReceiptRows = await db.getAll('SELECT drug_id, quantity FROM pending_receipts WHERE status IS NULL OR status = ?', ['pending']);
     const { pendingSalesQtyByBatch, pendingReceiptQtyByDrug } = buildPendingStockMaps(pendingSalesRows, pendingReceiptRows);
+    setPendingSalesByBatch(pendingSalesQtyByBatch);
+
+    const { data: countRows, error: countRowsError } = await supabase
+      .from('stock_reconciliation')
+      .select('batch_id, last_counted_at, last_variance')
+      .eq('shop_id', selectedShopId);
+    if (!countRowsError) setLastCountByBatch(buildLastCountMap(countRows));
 
     const batchesByDrug = {};
     for (const batch of refreshedWithSuppliers) {
@@ -409,6 +452,113 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
         latest_price: availableBatches.reduce((price, batch) => Number(batch.selling_price || 0) || price, 0),
       };
     }));
+  }
+
+  function openCountDialog(item) {
+    // One client ID per batch per dialog: a retry after a network drop is recorded once, not twice.
+    const entries = {};
+    for (const batch of item.batches || []) {
+      entries[batch.id] = { counted: '', reason: '', clientId: newClientId() };
+    }
+    setCountDrug(item);
+    setCountEntries(entries);
+    setCountError('');
+    setError('');
+    setMessage('');
+  }
+
+  function closeCountDialog(force = false) {
+    if (savingCount && !force) return;
+    setCountDrug(null);
+    setCountEntries({});
+    setCountError('');
+  }
+
+  function updateCountEntry(batchId, field, value) {
+    setCountEntries((previous) => ({
+      ...previous,
+      [batchId]: { ...previous[batchId], [field]: value },
+    }));
+  }
+
+  async function saveStockCount(event) {
+    event.preventDefault();
+    if (!selectedShopId || !countDrug || savingCount) return;
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setCountError('Stock counts need an internet connection so they are checked against the latest stock. Reconnect and try again.');
+      return;
+    }
+
+    const toSave = [];
+    for (const batch of countDrug.batches || []) {
+      const entry = countEntries[batch.id];
+      if (!entry || String(entry.counted).trim() === '') continue;
+
+      const label = batch.batch_number || 'with no batch number';
+      const counted = Number(entry.counted);
+      if (!Number.isInteger(counted) || counted < 0) {
+        setCountError(`Enter a whole number of zero or more for batch ${label}.`);
+        return;
+      }
+      if (Number(pendingSalesByBatch[batch.id] || 0) > 0) {
+        setCountError(`Batch ${label} has sales waiting to sync. Let them sync before counting it, or the count will be wrong.`);
+        return;
+      }
+      const variance = counted - Number(batch.quantity_remaining || 0);
+      if (variance !== 0 && entry.reason.trim().length < 3) {
+        setCountError(`Batch ${label} is ${signedUnits(variance)} units off. Give a reason (for example damaged, theft, miscount).`);
+        return;
+      }
+      toSave.push({ batch, counted, variance, entry });
+    }
+
+    if (!toSave.length) {
+      setCountError('Enter the counted quantity for at least one batch.');
+      return;
+    }
+
+    setSavingCount(true);
+    setCountError('');
+    setError('');
+    setMessage('');
+
+    let saved = 0;
+    let adjusted = 0;
+    try {
+      for (const { batch, counted, variance, entry } of toSave) {
+        const { error: countRpcError } = await supabase.rpc('record_stock_count', {
+          p_shop_id: selectedShopId,
+          p_batch_id: batch.id,
+          p_counted_quantity: counted,
+          p_reason: entry.reason.trim() || null,
+          p_client_count_id: entry.clientId,
+        });
+        if (countRpcError) {
+          throw new Error(`Batch ${batch.batch_number || 'with no batch number'}: ${countRpcError.message}`);
+        }
+        saved += 1;
+        if (variance !== 0) adjusted += 1;
+      }
+
+      const matched = saved - adjusted;
+      setMessage(
+        `${countDrug.name}: ${saved} batch${saved === 1 ? '' : 'es'} counted. `
+        + (adjusted
+          ? `${adjusted} adjusted, ${matched} matched the system.`
+          : 'Everything matched the system.')
+      );
+      closeCountDialog(true);
+      await refreshCurrentStock();
+    } catch (saveError) {
+      // Batches saved before the failure keep their client IDs, so pressing Save again will not double-record them.
+      setCountError(
+        (saveError.message || 'Unable to save the stock count.')
+        + (saved ? ` The ${saved} batch${saved === 1 ? '' : 'es'} before it were saved; pressing Save again will not record them twice.` : '')
+      );
+    } finally {
+      setSavingCount(false);
+    }
   }
 
   async function saveWriteOff(event) {
@@ -532,8 +682,8 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
             </thead>
             <tbody>
               {stockRows.map((item) => (
-                <>
-                  <tr key={item.drug_id}>
+                <Fragment key={item.drug_id}>
+                  <tr>
                     <td>
                       <strong>{item.name}</strong>
                       {item.generic_name ? <div className="muted small">{item.generic_name}</div> : null}
@@ -558,6 +708,14 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
                           disabled={item.batches.length === 0}
                         >
                           {expandedBatchDrugId === item.drug_id ? 'Hide batches' : 'Show batches'}
+                        </button>
+                        <button
+                          type="button"
+                          className="table-action"
+                          onClick={() => openCountDialog(item)}
+                          disabled={item.batches.length === 0}
+                        >
+                          Count stock
                         </button>
                         <button type="button" className="table-action" onClick={() => openClassificationEditor(item)}>
                           Edit classification
@@ -592,13 +750,19 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
                               <span>Exp {batch.expiry_date}</span>
                               <span>{Number(batch.quantity_remaining || 0)} units</span>
                               <strong>{formatCurrency(batch.selling_price)}</strong>
+                              <span className="muted small">
+                                {formatCountDate(lastCountByBatch[batch.id]?.countedAt)}
+                                {lastCountByBatch[batch.id]?.variance
+                                  ? ` (${signedUnits(lastCountByBatch[batch.id].variance)})`
+                                  : ''}
+                              </span>
                             </div>
                           ))}
                         </div>
                       </td>
                     </tr>
                   ) : null}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -671,8 +835,99 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
             </label>
 
             <div className="modal-actions">
-              <button type="button" className="secondary-button" onClick={closeClassificationEditor} disabled={savingClassification}>Cancel</button>
+              <button type="button" className="secondary-button" onClick={() => closeClassificationEditor()} disabled={savingClassification}>Cancel</button>
               <button type="submit" disabled={savingClassification}>{savingClassification ? 'Saving...' : 'Save classification'}</button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {countDrug ? (
+        <div className="modal-backdrop" role="presentation">
+          <form className="classification-modal stock-count-modal" onSubmit={saveStockCount}>
+            <div>
+              <h3>Count stock</h3>
+              <p className="muted">
+                {countDrug.name}
+                {countDrug.generic_name ? ` - ${countDrug.generic_name}` : ''}
+              </p>
+              <p className="muted small">
+                Count what is physically on the shelf for each batch. Leave a batch blank to skip it.
+                Any difference needs a reason and is recorded with your name.
+              </p>
+            </div>
+
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Batch</th>
+                    <th>System</th>
+                    <th>Counted</th>
+                    <th>Difference</th>
+                    <th>Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(countDrug.batches || []).map((batch) => {
+                    const entry = countEntries[batch.id] || { counted: '', reason: '' };
+                    const systemQuantity = Number(batch.quantity_remaining || 0);
+                    const hasCount = String(entry.counted).trim() !== '';
+                    const counted = Number(entry.counted);
+                    const variance = hasCount && Number.isInteger(counted) ? counted - systemQuantity : null;
+                    const pendingSales = Number(pendingSalesByBatch[batch.id] || 0);
+
+                    return (
+                      <tr key={batch.id}>
+                        <td>
+                          <strong>{batch.batch_number || 'N/A'}</strong>
+                          <div className="muted small">Exp {batch.expiry_date}{isExpiredBatch(batch) ? ' (expired)' : ''}</div>
+                          {pendingSales > 0 ? (
+                            <div className="muted small critical">{pendingSales} unit(s) in unsynced sales</div>
+                          ) : null}
+                        </td>
+                        <td>{systemQuantity}</td>
+                        <td>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            inputMode="numeric"
+                            value={entry.counted}
+                            onChange={(event) => updateCountEntry(batch.id, 'counted', event.target.value)}
+                            disabled={savingCount || pendingSales > 0}
+                            aria-label={`Counted quantity for batch ${batch.batch_number || 'N/A'}`}
+                          />
+                        </td>
+                        <td>
+                          {variance === null
+                            ? '-'
+                            : variance === 0
+                              ? 'Matches'
+                              : <strong className="critical">{signedUnits(variance)}</strong>}
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            value={entry.reason}
+                            onChange={(event) => updateCountEntry(batch.id, 'reason', event.target.value)}
+                            disabled={savingCount || !variance}
+                            placeholder={variance ? 'e.g. damaged, miscount' : ''}
+                            aria-label={`Reason for difference on batch ${batch.batch_number || 'N/A'}`}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {countError ? <p className="error">{countError}</p> : null}
+
+            <div className="modal-actions">
+              <button type="button" className="secondary-button" onClick={() => closeCountDialog()} disabled={savingCount}>Cancel</button>
+              <button type="submit" disabled={savingCount}>{savingCount ? 'Saving count...' : 'Save count'}</button>
             </div>
           </form>
         </div>
@@ -708,7 +963,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
             </label>
 
             <div className="modal-actions">
-              <button type="button" className="secondary-button" onClick={closeWriteOffDialog} disabled={savingWriteOff}>Cancel</button>
+              <button type="button" className="secondary-button" onClick={() => closeWriteOffDialog()} disabled={savingWriteOff}>Cancel</button>
               <button type="submit" disabled={savingWriteOff || !writeOffBatchId}>{savingWriteOff ? 'Writing off...' : 'Write off stock'}</button>
             </div>
           </form>
@@ -761,7 +1016,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
             </label>
 
             <div className="modal-actions">
-              <button type="button" className="secondary-button" onClick={closeTransferDialog} disabled={savingTransfer}>Cancel</button>
+              <button type="button" className="secondary-button" onClick={() => closeTransferDialog()} disabled={savingTransfer}>Cancel</button>
               <button type="submit" disabled={savingTransfer}>{savingTransfer ? 'Transferring...' : 'Transfer stock'}</button>
             </div>
           </form>
