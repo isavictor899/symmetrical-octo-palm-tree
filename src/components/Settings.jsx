@@ -11,9 +11,16 @@ import {
   MIN_FONT_SCALE,
   saveFontScale,
 } from '../lib/fontScale';
+import {
+  getDeviceReceiptWidth,
+  printReceipt,
+  RECEIPT_WIDTHS,
+  sampleReceipt,
+  setDeviceReceiptWidth,
+} from '../lib/receipt';
 import './Settings.css';
 
-const SHOP_FIELDS = 'id, name, theme_color, location, phone, email, kra_pin, ppb_licence_no, receipt_footer';
+const SHOP_FIELDS = 'id, name, theme_color, location, phone, email, kra_pin, ppb_licence_no, receipt_footer, receipt_paper_width';
 
 const EMPTY_SHOP = {
   name: '',
@@ -24,6 +31,7 @@ const EMPTY_SHOP = {
   ppb_licence_no: '',
   receipt_footer: '',
   theme_color: '',
+  receipt_paper_width: '80mm',
 };
 
 function shopToForm(shop) {
@@ -36,6 +44,7 @@ function shopToForm(shop) {
     ppb_licence_no: shop?.ppb_licence_no || '',
     receipt_footer: shop?.receipt_footer || '',
     theme_color: shop?.theme_color || defaultBrandColor,
+    receipt_paper_width: shop?.receipt_paper_width || '80mm',
   };
 }
 
@@ -49,6 +58,7 @@ function shopRpcArgs(form) {
     p_ppb_licence_no: form.ppb_licence_no.trim() || null,
     p_receipt_footer: form.receipt_footer.trim() || null,
     p_theme_color: form.theme_color || null,
+    p_receipt_paper_width: form.receipt_paper_width || null,
   };
 }
 
@@ -110,6 +120,12 @@ function ShopFields({ form, onChange, idPrefix, showColour = true }) {
           </label>
         </div>
         <label className="field">
+        <label className="field">
+          <span>Receipt printer paper (shop default)</span>
+          <select value={form.receipt_paper_width} onChange={(event) => onChange('receipt_paper_width', event.target.value)}>
+            {RECEIPT_WIDTHS.map((width) => <option key={width.value} value={width.value}>{width.label}</option>)}
+          </select>
+        </label>
           <span>Receipt footer message</span>
           <textarea
             value={form.receipt_footer}
@@ -142,7 +158,7 @@ function ShopFields({ form, onChange, idPrefix, showColour = true }) {
   );
 }
 
-export default function Settings({ userId }) {
+export default function Settings({ userId, organizationShops = [], activeShopId = null }) {
   const [allShops, setAllShops] = useState([]);
   const [selectedShopId, setSelectedShopId] = useState(null);
   const [form, setForm] = useState(EMPTY_SHOP);
@@ -151,8 +167,8 @@ export default function Settings({ userId }) {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [fontScale, setFontScale] = useState(DEFAULT_FONT_SCALE);
-  const [isAdmin, setIsAdmin] = useState(false);
-
+  const [deviceWidth, setDeviceWidth] = useState(() => getDeviceReceiptWidth());
+  const [printerNotice, setPrinterNotice] = useState('');
   const [addingShop, setAddingShop] = useState(false);
   const [newShop, setNewShop] = useState(EMPTY_SHOP);
   const [newShopError, setNewShopError] = useState('');
@@ -167,7 +183,21 @@ export default function Settings({ userId }) {
   function updateFontScale(value) {
     setFontScale(saveFontScale(userId, value));
   }
+  // The shop this device is selling from (any role), for the printer section.
+  const deviceShop = organizationShops.find((shop) => shop.id === activeShopId) || null;
+  const shopDefaultWidth = deviceShop?.receipt_paper_width || '80mm';
+  const effectiveWidth = deviceWidth || shopDefaultWidth;
 
+  function changeDeviceWidth(value) {
+    setDeviceReceiptWidth(value);
+    setDeviceWidth(getDeviceReceiptWidth());
+    setPrinterNotice('');
+  }
+
+  function printTestReceipt() {
+    const ok = printReceipt(sampleReceipt(), deviceShop || { name: 'Test shop' }, effectiveWidth);
+    setPrinterNotice(ok ? '' : 'Your browser blocked the receipt window. Allow pop-ups for this site, then try again.');
+  }
   // Load the full shop list (admins may manage more than one shop),
   // defaulting to the signed-in user's own shop.
   useEffect(() => {
@@ -375,6 +405,25 @@ export default function Settings({ userId }) {
             <strong>Preview</strong>
             <span>Readable text for stock, sales, and reports.</span>
           </div>
+        </section>
+
+        <section className="settings-printer" aria-labelledby="printer-heading">
+          <h2 id="printer-heading">This device's receipt printer</h2>
+          <p>Saved on this device only. Use it when this till's printer differs from the shop's usual one.</p>
+          <div className="settings-printer-row">
+            <label className="field">
+              <span>Paper width</span>
+              <select value={deviceWidth} onChange={(event) => changeDeviceWidth(event.target.value)}>
+                <option value="">Use shop default ({RECEIPT_WIDTHS.find((width) => width.value === shopDefaultWidth)?.label || shopDefaultWidth})</option>
+                {RECEIPT_WIDTHS.map((width) => <option key={width.value} value={width.value}>{width.label}</option>)}
+              </select>
+            </label>
+            <button type="button" className="secondary-button" onClick={printTestReceipt}>Print test receipt</button>
+          </div>
+          <p className="settings-hint">
+            For thermal printers, set the printer's paper size to the same width in the print dialog and turn off headers and footers.
+          </p>
+          {printerNotice ? <div className="settings-error" role="alert">{printerNotice}</div> : null}
         </section>
 
         {isAdmin ? (

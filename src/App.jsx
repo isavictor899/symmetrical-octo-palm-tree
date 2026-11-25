@@ -30,6 +30,7 @@ import Login from './components/Login';
 import PageErrorBoundary from './components/PageErrorBoundary';
 import NotificationBell from './components/NotificationBell';
 import ChangePassword from './components/ChangePassword';
+import { clearRecentReceipts } from './lib/receipt';
 import './App.css';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -43,7 +44,7 @@ const Finance = lazy(() => import('./components/Finance'));
 const Reports = lazy(() => import('./components/Reports'));
 const StaffManagement = lazy(() => import('./components/StaffManagement'));
 // Shop details every page can use; the receipt fields are printed on receipts.
-const SHOP_LIST_FIELDS = 'id, name, theme_color, location, phone, email, kra_pin, ppb_licence_no, receipt_footer';
+const SHOP_LIST_FIELDS = 'id, name, theme_color, location, phone, email, kra_pin, ppb_licence_no, receipt_footer, receipt_paper_width';
 
 
 function NavIcon({ name }) {
@@ -186,6 +187,8 @@ export default function App() {
         setStaffName('');
         setOrganizationShops([]);
         shopScopeRef.current = null;
+                // Shared tills: the next person must not see the last person's receipts.
+        clearRecentReceipts();
         setMustChangePassword(false);
         setAccountInactive(false);
         setShowPasswordChange(false);
@@ -485,6 +488,8 @@ export default function App() {
                     onNavigatePage={navigateToPage}
                     activeShopId={activeShopId}
                     activeShopName={activeShop?.name || ''}
+                    activeShop={activeShop}
+                    staffName={staffName}
                     organizationShops={organizationShops}
                     onActiveShopChange={setActiveShopId}
                     dataVersion={dataVersion}

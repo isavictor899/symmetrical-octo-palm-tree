@@ -4,31 +4,12 @@ import { supabase } from '../lib/supabaseClient';
 import { flushAll } from '../lib/powersync/flush';
 import { useStaff } from '../lib/useStaff';
 import { todayNairobi } from '../lib/dates';
+import { printReceipt, receiptNumberFor, rememberReceipt } from '../lib/receipt';
+import ReceiptReprint from './ReceiptReprint';
 import './SaleEntry.css';
 
 function formatKes(n) {
   return `KES ${n.toFixed(2)}`;
-}
-
-function printSaleReceipt(receipt, shopName) {
-  const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
-  // Do not pass `noopener`: browsers return null for that option, which made
-  // the print button silently exit before writing the receipt.
-  const popup = window.open('', '_blank', 'width=680,height=800');
-  if (!popup) return;
-  const unitPrice = (line) => line.kind === 'equipment'
-    ? Number(line.item?.selling_price || 0)
-    : Math.round((Number(line.batch?.selling_price || 0) - Number(line.discountAmount || 0)) * 100) / 100;
-  const rows = receipt.items.map((line) => `<tr><td>${escapeHtml(line.drugName)}</td><td>${line.qty}</td><td>${formatKes(unitPrice(line))}</td><td>${formatKes(unitPrice(line) * line.qty)}</td></tr>`).join('');
-  popup.document.write(`<!doctype html><html><head><title>Sales receipt</title><style>body{font:14px Arial,sans-serif;color:#18211d;margin:32px}h1{margin:0 0 4px;font-size:22px}p{margin:4px 0;color:#53605a}table{width:100%;border-collapse:collapse;margin-top:22px}th,td{padding:10px 4px;border-bottom:1px solid #dfe4df;text-align:left}th:not(:first-child),td:not(:first-child){text-align:right}.total{margin-top:20px;font-size:17px;font-weight:700}@media print{body{margin:18px}}</style></head><body><h1>Sales receipt</h1><p><b>${escapeHtml(shopName || 'Pharmacy POS')}</b></p><p>${new Date(receipt.time).toLocaleString('en-KE')} · ${escapeHtml(receipt.paymentMethod)}</p><table><thead><tr><th>Item</th><th>Qty</th><th>Unit price</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table><p class="total">Total: ${formatKes(receipt.total)}</p></body></html>`);
-  popup.document.close();
-  popup.focus();
-  let didPrint = false;
-  const printOnce = () => { if (!didPrint && !popup.closed) { didPrint = true; popup.print(); } };
-  popup.onload = printOnce;
-  // about:blank is already loaded in some browsers before its load handler is
-  // assigned, so schedule printing after the document has been written too.
-  window.setTimeout(printOnce, 250);
 }
 
 // First-Expiry-First-Out: among in-stock, non-expired batches, pick the
@@ -41,7 +22,7 @@ function pickFefoBatch(drug) {
   return [...sellable].sort((a, b) => new Date(a.expiry_date) - new Date(b.expiry_date))[0];
 }
 
-export default function SaleEntry({ activeShopId, activeShopName, isActive = true, mode = 'sale', initialSearch = '' }) {
+export default function SaleEntry({ activeShopId, activeShopName, activeShop = null, staffName = '', isActive = true, mode = 'sale', initialSearch = '' }) {
   const pageMode = mode;
   const db = usePowerSync();
   const syncStatus = useStatus(); // { connected, ... } ” lets us show online/offline
@@ -173,6 +154,8 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
   const [status, setStatus] = useState('idle'); // idle | submitting | done
   const [checkoutError, setCheckoutError] = useState(null);
   const [lastReceipt, setLastReceipt] = useState(null);
+  const [showReprint, setShowReprint] = useState(false);
+  const [printNotice, setPrintNotice] = useState('');
   const [returnSearch, setReturnSearch] = useState('');
   const [returnRows, setReturnRows] = useState([]);
   const [selectedReturnItem, setSelectedReturnItem] = useState(null);
@@ -188,6 +171,9 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
   useEffect(() => {
     if (pageMode === 'sale') setQuery(initialSearch || '');
   }, [effectiveShopId, initialSearch, pageMode]);
+    // Shop details for the receipt header. Falls back to just the name if the
+  // full shop record has not loaded yet (e.g. offline at start-up).
+  const receiptShop = activeShop || { name: activeShopName };
   const cartNeedsPrescription = cart.some((line) => line.requiresPrescription === true);
   const cartHasUnclassifiedDrug = cart.some((line) => line.requiresPrescription === null);
 
@@ -509,6 +495,7 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       if (sessionError || !session) throw new Error('Your sign-in session is unavailable. Sign in again before recording this sale.');
       const localId = crypto.randomUUID();
+      const soldAt = new Date().toISOString();
       const items = cart.map((line) => ({
         item_type: line.kind,
         quantity: line.qty,
@@ -533,12 +520,33 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
           cartNeedsPrescription ? prescriptionReference.trim() : '',
           cartNeedsPrescription ? prescriberName.trim() : '',
           cartNeedsPrescription ? prescriptionDate : '',
-          new Date().toISOString(), 'pending', null,
+          soldAt, 'pending', null,
         ]
       );
       await flushAll(db);
       const remaining = await db.getAll('SELECT status, last_error FROM pending_sales WHERE id = ?', [localId]);
       const queueRow = remaining[0] || null;
+      
+      // The receipt is built from the cart, so it can be printed even offline.
+      // Its number is the sale's own ID, which the server keeps after sync.
+      const receipt = {
+        receiptNo: receiptNumberFor(localId),
+        time: soldAt,
+        paymentMethod,
+        servedBy: staffName,
+        total,
+        items: cart.map((line) => ({
+          name: line.drugName,
+          qty: line.qty,
+          unitPrice: linePrice(line),
+          originalUnitPrice: Number(baseLinePrice(line)),
+        })),
+        prescription: cartNeedsPrescription
+          ? { reference: prescriptionReference.trim(), prescriber: prescriberName.trim(), date: prescriptionDate }
+          : null,
+        pendingSync: Boolean(queueRow && queueRow.status !== 'failed'),
+      };
+      if (queueRow?.status !== 'failed') rememberReceipt(effectiveShopId, receipt);
 
       if (!queueRow) {
         const soldByBatch = items.reduce((acc, item) => {
@@ -577,7 +585,8 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
         }));
       }
 
-      setLastReceipt({ items: cart, total, paymentMethod, time: new Date(), queueRow });
+      setLastReceipt({ items: cart, total, paymentMethod, time: new Date(soldAt), queueRow, receipt });
+      setPrintNotice(''); 
       setCart([]);
       setPrescriptionReference('');
       setPrescriberName('');
@@ -607,9 +616,21 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
           {activeShopName && <p>{pageMode === 'sale' ? 'Selling from' : 'Processing returns for'} {activeShopName}</p>}
         </div>
         <div className="pos-header-actions">
+          {pageMode === 'sale' && effectiveShopId ? (
+            <button type="button" className="button secondary" onClick={() => setShowReprint(true)}>Reprint receipt</button>
+          ) : null}
           <button type="button" className="button secondary" onClick={() => retryFetchStaff()}>{retrying ? 'Retrying…' : 'Retry staff sync'}</button>
         </div>
       </header>
+
+      {showReprint ? (
+        <ReceiptReprint
+          shopId={effectiveShopId}
+          shop={receiptShop}
+          online={typeof navigator === 'undefined' || navigator.onLine !== false}
+          onClose={() => setShowReprint(false)}
+        />
+      ) : null}
 
       {syncedNotice && <div className="notice success">Staff record synced locally</div>}
       {failedSales.length > 0 && <section aria-label="Sales needing attention" className="notice danger">
@@ -801,9 +822,24 @@ export default function SaleEntry({ activeShopId, activeShopName, isActive = tru
                     ? 'Sale saved on this device and queued to sync.'
                     : 'Sale synced successfully.'}
                 {' '}{lastReceipt.items.length} item(s), {formatKes(lastReceipt.total)} via {lastReceipt.paymentMethod}.
-                <button type="button" className="receipt-print" onClick={() => printSaleReceipt(lastReceipt, activeShopName)}>Print receipt</button>
+                {lastReceipt.queueRow?.status !== 'failed' && lastReceipt.receipt ? (
+                  <>
+                    {' '}Receipt {lastReceipt.receipt.receiptNo}.
+                    <button
+                      type="button"
+                      className="receipt-print"
+                      onClick={() => {
+                        const ok = printReceipt(lastReceipt.receipt, receiptShop);
+                        setPrintNotice(ok ? '' : 'Your browser blocked the receipt window. Allow pop-ups for this site, then press Print receipt again.');
+                      }}
+                    >
+                      Print receipt
+                    </button>
+                  </>
+                ) : null}
               </div>
             )}
+            {printNotice ? <div className="inline-error">{printNotice}</div> : null}
           </div>
         </aside> : <aside className="checkout-pane return-summary" aria-label="Return summary">
           <div className="cart-heading">Return summary</div>

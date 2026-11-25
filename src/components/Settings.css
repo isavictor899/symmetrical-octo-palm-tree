@@ -18,3 +18,10 @@
 @media (max-width: 520px) {
   .settings-shops-header { flex-direction: column; }
 }
+.settings-printer { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--border); display: grid; gap: 10px; }
+.settings-printer h2 { margin: 0; font-size: 1rem; }
+.settings-printer > p { margin: 0; color: var(--text-muted); font-size: 0.8125rem; }
+.settings-printer-row { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.settings-printer-row .field { flex: 1 1 240px; }
+.settings-card .secondary-button { color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); }
+.settings-card .secondary-button:hover:not(:disabled) { background: var(--surface-hover); }

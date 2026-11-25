@@ -407,3 +407,12 @@
 
 }
 
+/* Receipt reprint */
+.reprint-modal { display: grid; gap: 12px; width: min(560px, 100%); max-height: calc(100vh - 36px); overflow: hidden; }
+.reprint-list { display: grid; gap: 6px; max-height: min(52vh, 460px); overflow-y: auto; }
+.reprint-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--radius); }
+.reprint-row .mini-badge { margin-left: 8px; }
+.reprint-row-actions { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+@media (max-width: 520px) {
+  .reprint-row { align-items: start; flex-direction: column; }
+}
