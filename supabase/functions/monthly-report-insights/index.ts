@@ -1,8 +1,9 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 
 const ALLOWED_ORIGINS = ['https://pos.enoralabs.co.ke', 'http://localhost:5173'];
-let corsHeaders: Record<string, string> = {};
 
+// Built per request: a shared module-level variable could send one request's
+// headers with another request's response when two arrive at once.
 function buildCors(origin: string | null) {
   return {
     'Access-Control-Allow-Origin': origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
@@ -11,10 +12,6 @@ function buildCors(origin: string | null) {
     'Content-Type': 'application/json',
     'Vary': 'Origin',
   };
-}
-
-function jsonResponse(body: Record<string, unknown>, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: corsHeaders });
 }
 
 function cleanAnalytics(analytics: Record<string, unknown>) {
@@ -66,7 +63,10 @@ function cleanAnalytics(analytics: Record<string, unknown>) {
 }
 
 Deno.serve(async (request) => {
-  corsHeaders = buildCors(request.headers.get('origin'));
+  const corsHeaders = buildCors(request.headers.get('origin'));
+  const jsonResponse = (body: Record<string, unknown>, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: corsHeaders });
+
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (request.method !== 'POST') return jsonResponse({ error: 'Method not allowed.' }, 405);
 
@@ -77,7 +77,6 @@ Deno.serve(async (request) => {
   const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
   const geminiApiKey = Deno.env.get('GEMINI_API_KEY');
   if (!supabaseUrl || !supabaseAnonKey) return jsonResponse({ error: 'Supabase function environment is incomplete.' }, 500);
-  if (!geminiApiKey) return jsonResponse({ error: 'AI reporting is not configured. Add the Gemini API key as the GEMINI_API_KEY function secret.' }, 503);
 
   try {
     const payload = await request.json();
@@ -88,6 +87,9 @@ Deno.serve(async (request) => {
     if (!Array.isArray(shopIds) || shopIds.length < 1 || shopIds.length > 30 || !rawAnalytics || typeof rawAnalytics !== 'object') {
       return jsonResponse({ error: 'The report data is incomplete.' }, 400);
     }
+    if (shopIds.some((id) => typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id))) {
+      return jsonResponse({ error: 'The report data is incomplete.' }, 400);
+    }
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authorization } },
@@ -96,39 +98,25 @@ Deno.serve(async (request) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return jsonResponse({ error: 'Your session is invalid. Sign in again.' }, 401);
 
-    const { data: staff, error: staffError } = await supabase.from('staff')
-      .select('role, shops!inner(organization_id)')
-      .eq('auth_user_id', user.id)
-      .single();
-    if (staffError || !staff) return jsonResponse({ error: 'Unable to verify report access.' }, 403);
-    const role = String(staff.role ?? '').trim().toLowerCase();
-    if (!['admin', 'administrator', 'super_admin', 'superadmin', 'owner', 'shop_admin', 'shop-admin'].includes(role)) {
-      return jsonResponse({ error: 'Administrator access is required for organization report insights.' }, 403);
+    // 1. A saved briefing that is still fresh? get_monthly_insight also checks
+    //    the caller is an active admin and every shop is in their organization.
+    const { data: saved, error: savedError } = await supabase.rpc('get_monthly_insight', {
+      p_month: month,
+      p_shop_ids: shopIds,
+    });
+    if (savedError) {
+      const status = savedError.code === 'P0001' ? 403 : 500;
+      return jsonResponse({ error: status === 403 ? savedError.message : 'Unable to load saved insights.' }, status);
     }
-    const organizationId = (staff.shops as { organization_id?: string } | null)?.organization_id;
-    if (!organizationId) return jsonResponse({ error: 'This account is not linked to an organization.' }, 403);
+    if (Array.isArray(saved) && saved.length > 0) {
+      return jsonResponse({ insights: saved[0].insights, generatedAt: saved[0].generated_at, cached: true });
+    }
 
-    const { data: allowed } = await supabase.rpc('consume_insight_quota', { p_limit: 10 });
+    // 2. Generating a new one spends the admin's daily AI quota.
+    if (!geminiApiKey) return jsonResponse({ error: 'AI reporting is not configured. Add the Gemini API key as the GEMINI_API_KEY function secret.' }, 503);
+    const { data: allowed, error: quotaError } = await supabase.rpc('consume_insight_quota', { p_limit: 10 });
+    if (quotaError) return jsonResponse({ error: 'Unable to check the daily AI limit. Try again.' }, 500);
     if (!allowed) return jsonResponse({ error: 'Daily AI insight limit reached. Try again tomorrow.' }, 429);
-
-    const { data: organizationShops, error: shopsError } = await supabase.from('shops')
-      .select('id')
-      .eq('organization_id', organizationId);
-    if (shopsError) return jsonResponse({ error: 'Unable to verify organization shops.' }, 403);
-    const allowedShopIds = new Set((organizationShops ?? []).map((shop) => shop.id));
-    if (shopIds.some((id) => typeof id !== 'string' || !allowedShopIds.has(id))) {
-      return jsonResponse({ error: 'The report includes a shop outside your organization.' }, 403);
-    }
-
-    const { data: dailyInsights, error: insightsError } = await supabase.from('daily_insights_summary')
-      .select('id')
-      .eq('organization_id', organizationId)
-      .eq('report_month', month)
-      .limit(1);
-    if (insightsError) return jsonResponse({ error: 'Unable to verify daily insights.' }, 403);
-    if ((dailyInsights ?? []).length > 0) {
-      return jsonResponse({ error: 'The monthly insight report has already been generated. Please check back later.' }, 429);
-    }
 
     const analytics = cleanAnalytics(rawAnalytics as Record<string, unknown>);
     const promptData = JSON.stringify({ month, analytics });
@@ -153,7 +141,17 @@ Deno.serve(async (request) => {
     }
     const insights = geminiPayload?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || '').join('').trim();
     if (!insights) return jsonResponse({ error: 'The AI service returned an empty briefing. Please try again.' }, 502);
-    return jsonResponse({ insights });
+
+    // 3. Save it so the next visit shows it without another AI call. A failed
+    //    save must not hide a briefing the admin has already paid quota for.
+    const { data: generatedAt, error: saveError } = await supabase.rpc('save_monthly_insight', {
+      p_month: month,
+      p_shop_ids: shopIds,
+      p_insights: insights,
+    });
+    if (saveError) console.error('Saving monthly insight failed:', saveError.code, saveError.message);
+
+    return jsonResponse({ insights, generatedAt: generatedAt ?? new Date().toISOString(), cached: false });
   } catch (error) {
     console.error('Monthly report insights failed:', error instanceof Error ? error.message : 'Unknown error');
     return jsonResponse({ error: 'Unable to generate monthly report insights.' }, 500);
