@@ -79,7 +79,7 @@ export default function NotificationBell({ activeShopId, userId, onNavigatePage,
     const expiryLimit = nairobiDate(new Date(now.getTime() + 30 * DAY_MS));
 
     try {
-      const [salesResult, movementsResult, expiryResult] = await Promise.all([
+      const [salesResult, movementsResult, expiryResult, reviewResult] = await Promise.all([
         supabase.from('sales')
           .select('id, total_amount, sold_at')
           .eq('shop_id', activeShopId)
@@ -100,10 +100,37 @@ export default function NotificationBell({ activeShopId, userId, onNavigatePage,
           .lte('expiry_date', expiryLimit)
           .order('expiry_date', { ascending: true })
           .limit(20),
+        // Organization-wide; non-admins get zeros. A failure here must not
+        // hide the other notifications.
+        supabase.rpc('sales_review_counts').then((result) => result, () => ({ data: null })),
       ]);
 
       const failure = salesResult.error || movementsResult.error || expiryResult.error;
       if (failure) throw failure;
+
+      const review = Array.isArray(reviewResult?.data) ? reviewResult.data[0] : null;
+      const reviewNotices = [];
+      // The count is part of the id, so a new held sale shows as unread again.
+      if (Number(review?.held) > 0) {
+        reviewNotices.push({
+          id: `review:held:${review.held}`,
+          kind: 'review',
+          title: `${review.held} held sale${review.held === 1 ? '' : 's'} to approve`,
+          detail: 'Sales the server rejected after the medicine was handed over',
+          at: now.toISOString(),
+          page: 'salesReview',
+        });
+      }
+      if (Number(review?.to_check) > 0) {
+        reviewNotices.push({
+          id: `review:check:${review.to_check}`,
+          kind: 'review',
+          title: `${review.to_check} sale${review.to_check === 1 ? '' : 's'} to check`,
+          detail: 'Recorded late, or uploaded by someone other than the cashier credited',
+          at: now.toISOString(),
+          page: 'salesReview',
+        });
+      }
 
       const notices = [
         ...(salesResult.data || []).map((sale) => ({
@@ -147,7 +174,7 @@ export default function NotificationBell({ activeShopId, userId, onNavigatePage,
         }
         return new Date(b.at) - new Date(a.at);
       });
-      setItems(notices);
+      setItems([...reviewNotices, ...notices]);
     } catch (loadError) {
       setError(loadError.message || 'Could not load notifications.');
     } finally {
@@ -225,7 +252,7 @@ export default function NotificationBell({ activeShopId, userId, onNavigatePage,
                     const unread = !seenIds.has(item.id);
                     return <button key={item.id} className={`notification-item${unread ? ' unread' : ''}`} type="button" onClick={() => openNotification(item)}>
                       <span className={`notification-item-icon ${item.kind}`}><Icon size={17} stroke={1.8} /></span>
-                      <span className="notification-item-copy"><strong>{item.title}</strong><span>{item.detail}</span><small><IconClock size={13} /> {item.kind === 'expiry' ? 'Action needed' : relativeTime(item.at)}</small></span>
+                      <span className="notification-item-copy"><strong>{item.title}</strong><span>{item.detail}</span><small><IconClock size={13} /> {item.kind === 'expiry' || item.kind === 'review' ? 'Action needed' : relativeTime(item.at)}</small></span>
                       {unread && <span className="notification-unread-dot" aria-label="Unread" />}
                     </button>;
                   })}

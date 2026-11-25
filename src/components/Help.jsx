@@ -28,6 +28,16 @@ const FAQ = [
   },
   {
     audience: 'all',
+    q: 'A sale says it needs attention. What do I do?',
+    a: 'The server refused it, and the message says why (for example, not enough stock, or a missing prescription detail). If the customer is still with you, fix it and press Retry, or Cancel if they did not take the medicine. If the medicine was already handed over, press Send to admin. Sales left unresolved for 15 minutes go to the administrator automatically, so nothing is lost.',
+  },
+  {
+    audience: 'admin',
+    q: 'What is Sales review?',
+    a: 'Held sales are offline sales the server refused when they synced, usually because they were more than 7 days old or the stock records had run out. Approve records the sale and reduces stock; Void drops it with a reason. Sales to check were recorded normally but reached the server late, or were uploaded from a different login than the cashier credited. Compare them with your cash or M-Pesa records, then mark them checked. The bell shows when there is something to review.',
+  },
+  {
+    audience: 'all',
     q: 'How do I print or reprint a receipt?',
     a: 'After a sale, press Print receipt. To print one again later, open New sale, press Reprint receipt and search by the receipt number. Reprints are marked COPY.',
   },

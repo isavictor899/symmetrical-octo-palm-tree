@@ -2,8 +2,74 @@ import { supabase } from '../supabaseClient';
 
 const activeFlushes = new WeakMap();
 
+// A sale the server rejects this long after it was made is an offline sale
+// catching up: the customer has gone and the medicine with them, so it goes to
+// an admin's Sales review queue instead of waiting on this one till. A fresh
+// rejection stays here so the cashier can fix it while the customer is present.
+const SEND_TO_REVIEW_AFTER_MS = 15 * 60 * 1000;
+
+// Failed sales this page load already tried to send, so a sale the server
+// will not take (e.g. another shop's) is not re-sent on every sync.
+const reviewAttempted = new Set();
+
 function errorMessage(error) {
   return error?.message || String(error || 'Unknown server error');
+}
+
+function saleArgs(row) {
+  return {
+    p_shop_id: row.shop_id,
+    p_payment_method: row.payment_method,
+    p_items: JSON.parse(row.items_json),
+    p_client_sale_id: row.id,
+    p_prescription_reference: row.prescription_reference || null,
+    p_prescriber_name: row.prescriber_name || null,
+    p_prescription_date: row.prescription_date || null,
+    // Attribute the sale to the staff member who created it on the device, and
+    // preserve the real dispensing time instead of the sync time.
+    p_created_by_user_id: row.created_by_user_id || null,
+    p_sold_at: row.created_at || null,
+  };
+}
+
+function oldEnoughForReview(row) {
+  const madeAt = Date.parse(row.created_at || '');
+  return !Number.isFinite(madeAt) || Date.now() - madeAt >= SEND_TO_REVIEW_AFTER_MS;
+}
+
+// Hands a rejected sale to the server's Sales review queue and removes the
+// local copy once the server has it. Returns 'held', or 'recorded' if the
+// server already had the sale. Throws if the server did not take it.
+export async function sendSaleToReview(db, row, reason) {
+  const { p_shop_id, p_client_sale_id, ...payload } = saleArgs(row);
+  const { data, error } = await supabase.rpc('hold_rejected_sale', {
+    p_shop_id,
+    p_client_sale_id,
+    p_payload: payload,
+    p_error: String(reason || row.last_error || 'Rejected by the server.').slice(0, 500),
+  });
+  if (error) throw error;
+  await db.execute('DELETE FROM pending_sales WHERE id = ?', [row.id]);
+  return data;
+}
+
+// Moves failed sales that have sat on this till past the cashier window.
+async function sendStaleFailedSalesToReview(db, stats) {
+  const rows = await db.getAll("SELECT * FROM pending_sales WHERE status = 'failed' ORDER BY created_at");
+  for (const row of rows) {
+    if (!oldEnoughForReview(row) || reviewAttempted.has(row.id)) continue;
+    reviewAttempted.add(row.id);
+    try {
+      await sendSaleToReview(db, row);
+      stats.heldSales += 1;
+    } catch (error) {
+      if (!isPermanentRejection(error)) {
+        reviewAttempted.delete(row.id);
+        return;
+      }
+      console.warn('[PowerSync] Failed sale could not be sent for review:', errorMessage(error));
+    }
+  }
 }
 
 function isPermanentRejection(error) {
@@ -90,7 +156,7 @@ async function requestFreshDownload(db, uploadedCount) {
   }
 }
 
-async function flushTable(db, table, rpcName, mapArgs) {
+async function flushTable(db, table, rpcName, mapArgs, stats = { heldSales: 0 }) {
   const rows = await db.getAll(
     `SELECT * FROM ${table} WHERE status IS NULL OR status = 'pending' ORDER BY created_at`
   );
@@ -207,6 +273,25 @@ async function flushTable(db, table, rpcName, mapArgs) {
       uploaded += 1;
     } catch (error) {
       const message = errorMessage(error);
+      if (isPermanentRejection(error) && table === 'pending_sales' && oldEnoughForReview(row)) {
+        try {
+          await sendSaleToReview(db, row, message);
+          stats.heldSales += 1;
+          continue;
+        } catch (holdError) {
+          if (!isPermanentRejection(holdError)) {
+            // Could not reach the review queue right now: keep the sale
+            // pending and try the whole thing again on the next sync.
+            await db.execute(
+              `UPDATE ${table} SET last_error = ? WHERE id = ?`,
+              [message, row.id]
+            ).catch(() => {});
+            break;
+          }
+          reviewAttempted.add(row.id);
+          console.warn('[PowerSync] Rejected sale could not be sent for review:', errorMessage(holdError));
+        }
+      }
       if (isPermanentRejection(error)) {
         await db.execute(
           `UPDATE ${table} SET status = 'failed', last_error = ? WHERE id = ?`,
@@ -234,19 +319,9 @@ async function flushAllOnce(db) {
   const { data: { session }, error } = await supabase.auth.getSession();
   if (error || !session) return;
 
-  const uploadedSales = await flushTable(db, 'pending_sales', 'sell_stock_with_amount_discounts', (row) => ({
-    p_shop_id: row.shop_id,
-    p_payment_method: row.payment_method,
-    p_items: JSON.parse(row.items_json),
-    p_client_sale_id: row.id,
-    p_prescription_reference: row.prescription_reference || null,
-    p_prescriber_name: row.prescriber_name || null,
-    p_prescription_date: row.prescription_date || null,
-    // Attribute the sale to the staff member who created it on the device, and
-    // preserve the real dispensing time instead of the sync time.
-    p_created_by_user_id: row.created_by_user_id || null,
-    p_sold_at: row.created_at || null,
-  }));
+  const stats = { heldSales: 0 };
+  await sendStaleFailedSalesToReview(db, stats);
+  const uploadedSales = await flushTable(db, 'pending_sales', 'sell_stock_with_amount_discounts', saleArgs, stats);
 
   const uploadedReceipts = await flushTable(db, 'pending_receipts', 'receive_stock', (row) => ({
     p_shop_id: row.shop_id,
@@ -270,9 +345,14 @@ async function flushAllOnce(db) {
   const uploadedCount = uploadedSales + uploadedReceipts;
   await requestFreshDownload(db, uploadedCount);
 
-  if (uploadedCount > 0 && typeof window !== 'undefined') {
+  if ((uploadedCount > 0 || stats.heldSales > 0) && typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('pharmacy-pos:data-changed', {
-      detail: { uploadedSales, uploadedReceipts },
+      detail: { uploadedSales, uploadedReceipts, heldSales: stats.heldSales },
+    }));
+  }
+  if (stats.heldSales > 0 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('pharmacy-pos:sales-held', {
+      detail: { count: stats.heldSales },
     }));
   }
 }
@@ -290,5 +370,3 @@ export function flushAll(db) {
 
 export const flushPendingSales = flushAll;
 export const flushPendingReceipts = flushAll;
-
-

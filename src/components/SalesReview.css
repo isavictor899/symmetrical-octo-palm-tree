@@ -1,0 +1,31 @@
+.sales-review .review-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 14px; border-bottom: 1px solid var(--border); }
+.sales-review .review-tabs button { display: inline-flex; align-items: center; gap: 6px; margin-bottom: -1px; padding: 9px 14px; border: 0; border-bottom: 2px solid transparent; color: var(--text-muted); background: transparent; font-weight: 600; cursor: pointer; }
+.sales-review .review-tabs button.active { color: var(--text); border-bottom-color: var(--brand-primary); }
+.sales-review .review-count { min-width: 20px; padding: 1px 6px; border-radius: 999px; color: #fff; background: var(--danger); font-size: 0.6875rem; text-align: center; }
+
+.sales-review .review-explainer { max-width: 75ch; margin: 0 0 14px; line-height: 1.55; }
+.sales-review .review-empty { padding: 18px; border: 1px dashed var(--border-strong); border-radius: var(--radius); color: var(--text-muted); text-align: center; }
+
+.held-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.held-card { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.held-card header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px; }
+.held-card header strong { font-size: 1.0625rem; }
+.held-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 0.8125rem; }
+.held-facts dt { color: var(--text-muted); }
+.held-facts dd { margin: 0; overflow-wrap: anywhere; }
+.held-facts .held-reason { color: var(--danger); font-weight: 600; }
+.held-items { display: grid; gap: 3px; margin: 0; padding: 8px 10px; border-radius: var(--radius); background: var(--surface-subtle); list-style: none; font-size: 0.8125rem; }
+.held-items li { display: flex; justify-content: space-between; gap: 10px; }
+
+.sales-review .review-bulk { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.sales-review .review-flags { display: flex; flex-wrap: wrap; gap: 4px; }
+.sales-review .review-flag { display: inline-block; padding: 2px 8px; border-radius: 999px; color: var(--warning); background: var(--warning-bg); font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+.sales-review .review-outcome { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; }
+.sales-review .review-outcome.approved { color: var(--success); background: var(--success-bg); }
+.sales-review .review-outcome.voided { color: var(--danger); background: var(--danger-bg); }
+
+.review-hint { padding: 10px 12px; border-radius: var(--radius); background: var(--surface-subtle); line-height: 1.5; }
+.review-hint .link-button { padding: 0; border: 0; color: var(--brand-primary); background: none; font-weight: 700; text-decoration: underline; cursor: pointer; }
+
+/* Let wide tables scroll inside their box on phones instead of widening the page. */
+.sales-review, .sales-review section { min-width: 0; max-width: 100%; }

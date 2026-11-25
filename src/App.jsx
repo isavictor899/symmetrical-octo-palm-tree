@@ -5,6 +5,7 @@ import {
   IconCashRegister,
   IconChartBar,
   IconChevronDown,
+  IconClipboardCheck,
   IconDashboard,
   IconFileText,
   IconHelpCircle,
@@ -45,6 +46,7 @@ const Finance = lazy(() => import('./components/Finance'));
 const Reports = lazy(() => import('./components/Reports'));
 const StaffManagement = lazy(() => import('./components/StaffManagement'));
 const Help = lazy(() => import('./components/Help'));
+const SalesReview = lazy(() => import('./components/SalesReview'));
 // Shop details every page can use; the receipt fields are printed on receipts.
 const SHOP_LIST_FIELDS = 'id, name, theme_color, location, phone, email, kra_pin, ppb_licence_no, receipt_footer, receipt_paper_width';
 
@@ -54,6 +56,7 @@ function NavIcon({ name }) {
     dashboard: IconDashboard,
     sale: IconShoppingCart,
     salesReturns: IconHistory,
+    salesReview: IconClipboardCheck,
     receive: IconPackageImport,
     purchaseOrders: IconFileText,
     stockedDrugs: IconPill,
@@ -95,6 +98,7 @@ const pages = {
   dashboard: { label: 'Dashboard', icon: 'dashboard', component: Dashboard, group: 'Overview' },
   sale: { label: 'New sale', icon: 'sale', component: SaleEntry, group: 'Sales' },
   salesReturns: { label: 'Sales returns', icon: 'salesReturns', component: SaleEntry, group: 'Sales', props: { mode: 'return' } },
+  salesReview: { label: 'Sales review', icon: 'salesReview', component: SalesReview, group: 'Sales' },
   stockedDrugs: { label: 'Stocked drugs', icon: 'stockedDrugs', component: StockedDrugs, group: 'Inventory' },
   receive: { label: 'Receive stock', icon: 'receive', component: ReceiveStock, group: 'Inventory' },
   purchaseOrders: { label: 'Purchase orders', icon: 'purchaseOrders', component: PurchaseOrders, group: 'Inventory' },
@@ -313,7 +317,7 @@ export default function App() {
   const availablePages = Object.entries(pages).filter(([key]) => {
     if ((key === 'dashboard' || key === 'monthlyReport' || key === 'financeExpenses' || key === 'financeIncome' || key === 'financeTransactions' || key.endsWith('Report') || key === 'profitLoss') && !isAdminRole(staffRole)) return false;
     if ((key === 'receive' || key === 'purchaseOrders' || key === 'supplierDebts' || key === 'salesReturns') && !canReceiveStock(staffRole)) return false;
-    if (key === 'staff' && !isAdminRole(staffRole)) return false;
+    if ((key === 'staff' || key === 'salesReview') && !isAdminRole(staffRole)) return false;
     if (key === 'stockedDrugs' && !canManageStockedDrugs(staffRole)) return false;
     return true;
   });

@@ -426,3 +426,9 @@
 .unknown-barcode .search-input { margin: 0; }
 .unknown-barcode-list { display: grid; gap: 6px; max-height: 300px; overflow-y: auto; }
 .unknown-barcode-list .product-row { background: var(--surface); }
+/* Sales sent to the admin's review queue */
+.held-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.held-notice button { flex: 0 0 auto; padding: 4px 10px; border: 1px solid currentColor; border-radius: var(--radius-sm); color: inherit; background: transparent; font-size: 0.75rem; font-weight: 700; cursor: pointer; }
+.notice.danger .notice-help { display: block; margin-top: 4px; color: var(--text-muted); font-weight: 400; }
+.notice-row-actions { flex-wrap: wrap; justify-content: flex-end; }
+.notice-row button:disabled { opacity: 0.6; cursor: wait; }

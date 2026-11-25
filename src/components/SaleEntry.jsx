@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { usePowerSync, useQuery, useStatus } from '@powersync/react';
 import { supabase } from '../lib/supabaseClient';
-import { flushAll } from '../lib/powersync/flush';
+import { flushAll, sendSaleToReview } from '../lib/powersync/flush';
 import { useStaff } from '../lib/useStaff';
 import { todayNairobi } from '../lib/dates';
 import { printReceipt, receiptNumberFor, rememberReceipt } from '../lib/receipt';
@@ -174,6 +174,20 @@ export default function SaleEntry({ activeShopId, activeShopName, activeShop = n
   const [lastReceipt, setLastReceipt] = useState(null);
   const [showReprint, setShowReprint] = useState(false);
   const [printNotice, setPrintNotice] = useState('');
+  const [heldNotice, setHeldNotice] = useState('');
+  const [sendingToReview, setSendingToReview] = useState(null);
+
+  // Rejected offline sales moved to the admin's Sales review queue.
+  useEffect(() => {
+    function onHeld(event) {
+      const count = Number(event.detail?.count || 0);
+      if (count > 0) {
+        setHeldNotice(`${count} older sale${count === 1 ? ' was' : 's were'} rejected by the server and sent to an administrator for review. Nothing is lost.`);
+      }
+    }
+    window.addEventListener('pharmacy-pos:sales-held', onHeld);
+    return () => window.removeEventListener('pharmacy-pos:sales-held', onHeld);
+  }, []);
   const [scanNotice, setScanNotice] = useState(null); // { ok, text }
   const [unknownBarcode, setUnknownBarcode] = useState(null);
   const [linkSearch, setLinkSearch] = useState('');
@@ -592,6 +606,22 @@ export default function SaleEntry({ activeShopId, activeShopName, activeShop = n
     }
   }
 
+  // For a rejected sale whose medicine was already handed over: an admin
+  // approves or voids it from any device.
+  async function sendFailedSaleToAdmin(row) {
+    setSendingToReview(row.id);
+    try {
+      await sendSaleToReview(db, row);
+      setHeldNotice('Sent to an administrator for review.');
+    } catch (error) {
+      setCheckoutError(navigator.onLine === false
+        ? 'You are offline. Connect to the internet to send this sale to an administrator.'
+        : `Could not send the sale for review: ${error.message || 'unknown error'}`);
+    } finally {
+      setSendingToReview(null);
+    }
+  }
+
   const baseLinePrice = (line) => line.kind === 'equipment' ? line.item.selling_price : line.batch.selling_price;
   const lineDiscount = (line) => line.kind === 'equipment'
     ? 0
@@ -759,13 +789,19 @@ export default function SaleEntry({ activeShopId, activeShopName, activeShop = n
       ) : null}
 
       {syncedNotice && <div className="notice success">Staff record synced locally</div>}
+      {heldNotice && <div className="notice success held-notice" role="status">
+        <span>{heldNotice}</span>
+        <button type="button" onClick={() => setHeldNotice('')}>Dismiss</button>
+      </div>}
       {failedSales.length > 0 && <section aria-label="Sales needing attention" className="notice danger">
         <strong>{failedSales.length} sale{failedSales.length === 1 ? '' : 's'} need attention</strong>
+        <span className="notice-help">Fix and retry if the customer is still here. If the medicine was already handed over, send it to an administrator. Unresolved sales go to the administrator automatically after 15 minutes.</span>
         {failedSales.map((row) => <div key={row.id} className="notice-row">
           <span>{row.last_error || 'The server rejected this sale.'}</span>
           <span className="notice-row-actions">
             <button type="button" onClick={async () => { await db.execute("UPDATE pending_sales SET status = 'pending', last_error = NULL WHERE id = ?", [row.id]); flushAll(db); }}>Retry</button>
-            <button type="button" className="notice-cancel" onClick={() => cancelFailedSale(row.id)}>Cancel sale</button>
+            <button type="button" disabled={sendingToReview === row.id} onClick={() => sendFailedSaleToAdmin(row)}>{sendingToReview === row.id ? 'Sending…' : 'Send to admin'}</button>
+            <button type="button" className="notice-cancel" onClick={() => cancelFailedSale(row.id)}>Cancel (not handed over)</button>
           </span>
         </div>)}
       </section>}
