@@ -8,6 +8,7 @@ import {
   IconDashboard,
   IconFileText,
   IconHistory,
+  IconKey,
   IconLogout2,
   IconMenu2,
   IconPackageImport,
@@ -15,6 +16,7 @@ import {
   IconSearch,
   IconSettings,
   IconShoppingCart,
+  IconUsers,
   IconX,
 } from '@tabler/icons-react';
 import { supabase } from './lib/supabaseClient';
@@ -27,6 +29,7 @@ import { applyFontScale, loadFontScale } from './lib/fontScale';
 import Login from './components/Login';
 import PageErrorBoundary from './components/PageErrorBoundary';
 import NotificationBell from './components/NotificationBell';
+import ChangePassword from './components/ChangePassword';
 import './App.css';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -38,6 +41,7 @@ const MonthlyReport = lazy(() => import('./components/MonthlyReport'));
 const Settings = lazy(() => import('./components/Settings'));
 const Finance = lazy(() => import('./components/Finance'));
 const Reports = lazy(() => import('./components/Reports'));
+const StaffManagement = lazy(() => import('./components/StaffManagement'));
 
 
 function NavIcon({ name }) {
@@ -52,6 +56,7 @@ function NavIcon({ name }) {
     finance: IconCash,
     register: IconCashRegister,
     settings: IconSettings,
+    staff: IconUsers,
   };
   const Icon = icons[name];
   return Icon ? <Icon size={19} stroke={1.8} aria-hidden="true" focusable="false" /> : null;
@@ -98,6 +103,7 @@ const pages = {
   expiryReport: { label: 'Expiry report', icon: 'monthlyReport', component: Reports, group: 'Reports', props: { section: 'expiry' } },
   profitLoss: { label: 'Profit & loss', icon: 'monthlyReport', component: Reports, group: 'Reports', props: { section: 'profit' } },
   monthlyReport: { label: 'Monthly intelligence', icon: 'monthlyReport', component: MonthlyReport, group: 'Reports' },
+  staff: { label: 'Staff', icon: 'staff', component: StaffManagement, group: 'System' },
   settings: { label: 'Settings', icon: 'settings', component: Settings, group: 'System' },
 };
 
@@ -118,6 +124,9 @@ export default function App() {
   const [activeShopId, setActiveShopId] = useState(null);
   const [saleSearchTerm, setSaleSearchTerm] = useState('');
   const [dataVersion, setDataVersion] = useState(0);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [accountInactive, setAccountInactive] = useState(false);
+  const [showPasswordChange, setShowPasswordChange] = useState(false);
   const lastSessionUserId = useRef(null);
   const lastSetupUserId = useRef(null);
 
@@ -159,6 +168,9 @@ export default function App() {
         setStaffName('');
         setOrganizationShops([]);
         setActiveShopId(null);
+        setMustChangePassword(false);
+        setAccountInactive(false);
+        setShowPasswordChange(false);
         setVisitedPages(new Set(['sale']));
         applyBrandTheme(defaultBrandColor);
         // Signed out — stop syncing AND wipe local data, so a different
@@ -185,13 +197,18 @@ export default function App() {
 
         const { data, error } = await supabase
           .from('staff')
-          .select('role, full_name, shop_id, shops(name, theme_color, organization_id)')
+          .select('role, full_name, shop_id, must_change_password, shops(name, theme_color, organization_id)')
           .eq('auth_user_id', nextSession.user.id)
           .maybeSingle();
 
         setStaffRole(data?.role || null);
         setStaffName(data?.full_name || '');
         setActiveShopId(data?.shop_id || null);
+        setMustChangePassword(Boolean(data?.must_change_password));
+        // A successful lookup that finds no staff row means this login was
+        // deactivated (or never linked). A failed lookup (e.g. offline) is not
+        // treated as deactivated, so an offline till keeps working.
+        setAccountInactive(!error && !data);
 
         if (error) {
           console.warn('[App] staff lookup warning:', error.message);
@@ -266,7 +283,8 @@ export default function App() {
 
   const availablePages = Object.entries(pages).filter(([key]) => {
     if ((key === 'dashboard' || key === 'monthlyReport' || key === 'financeExpenses' || key === 'financeIncome' || key === 'financeTransactions' || key.endsWith('Report') || key === 'profitLoss') && !isAdminRole(staffRole)) return false;
-    if ((key === 'receive' || key === 'purchaseOrders' || key === 'supplierDebts') && !canReceiveStock(staffRole)) return false;
+    if ((key === 'receive' || key === 'purchaseOrders' || key === 'supplierDebts' || key === 'salesReturns') && !canReceiveStock(staffRole)) return false;
+    if (key === 'staff' && !isAdminRole(staffRole)) return false;
     if (key === 'salesReturns' && !canReceiveStock(staffRole)) return false;
     if (key === 'stockedDrugs' && !canManageStockedDrugs(staffRole)) return false;
     return true;
@@ -342,8 +360,22 @@ export default function App() {
         <div className="app-loading">Loading Pharmacy POS…</div>
       ) : recoveryMode ? (
         <Login recoveryMode onRecoveryComplete={() => setRecoveryMode(false)} />
-      ) : !session ? (
+            ) : !session ? (
         <Login />
+      ) : accountInactive ? (
+        <div className="login-page">
+          <div className="login-card">
+            <div className="login-brand">
+              <span className="brand-mark"><IconPill size={20} stroke={2} aria-hidden="true" /></span>
+              <span>Pharmacy POS</span>
+            </div>
+            <h1 className="login-title">Account not active</h1>
+            <p className="login-sub">This login is not linked to an active staff account. If you think this is a mistake, ask your pharmacy administrator.</p>
+            <button type="button" className="login-submit" onClick={() => supabase.auth.signOut()}>Sign out</button>
+          </div>
+        </div>
+      ) : mustChangePassword ? (
+        <ChangePassword forced staffName={staffName} onDone={() => setMustChangePassword(false)} />
       ) : (
         <div className="app-shell">
           {showUpdateToast && (
@@ -414,6 +446,7 @@ export default function App() {
                 <button className="profile-menu-dismiss" type="button" aria-label="Close profile menu" onClick={() => setProfileMenuOpen(false)} />
                 <div className="profile-menu" role="menu">
                   <div className="profile-menu-identity"><strong>{profileName}</strong><small>{session.user.email}</small><span>{profileRole}{activeShop?.name ? ` · ${activeShop.name}` : ''}</span></div>
+                  <button type="button" role="menuitem" className="profile-menu-neutral" onClick={() => { setProfileMenuOpen(false); setShowPasswordChange(true); }}><IconKey size={17} /> Change password</button>
                   <button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); supabase.auth.signOut(); }}><IconLogout2 size={17} /> Sign out</button>
                 </div>
               </>}
@@ -442,6 +475,9 @@ export default function App() {
               </div>
             ) : null}
           </main>
+          {showPasswordChange ? (
+            <ChangePassword onDone={() => setShowPasswordChange(false)} onCancel={() => setShowPasswordChange(false)} />
+          ) : null}
         </div>
       )}
     </PowerSyncContext.Provider>

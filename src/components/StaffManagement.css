@@ -1,0 +1,28 @@
+.staff-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 16px; margin: 4px 0 14px; }
+.staff-toolbar label { display: grid; gap: 4px; font-size: 0.8125rem; font-weight: 600; }
+.staff-toolbar .staff-toggle { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+
+.staff-status { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; white-space: nowrap; }
+.staff-status.active { color: var(--success); background: var(--success-bg); }
+.staff-status.pending { color: var(--warning); background: var(--warning-bg); }
+.staff-status.inactive { color: var(--danger); background: var(--danger-bg); }
+
+.staff-row-inactive td { opacity: 0.65; }
+.staff-you { margin-left: 8px; padding: 1px 7px; border-radius: 999px; color: var(--brand-primary); background: var(--brand-tint); font-size: 0.6875rem; font-weight: 700; }
+
+.staff-modal { width: min(520px, 100%); max-height: calc(100vh - 36px); overflow-y: auto; }
+.staff-modal .classification-reason .muted { font-weight: 400; }
+.staff-password-row { display: flex; gap: 8px; }
+.staff-password-row input { flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.04em; }
+
+.staff-credentials { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; margin: 0; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-subtle); }
+.staff-credentials dt { color: var(--text-muted, inherit); font-size: 0.8125rem; }
+.staff-credentials dd { margin: 0; font-weight: 700; word-break: break-all; }
+.staff-credentials code { font-size: 1.0625rem; letter-spacing: 0.06em; }
+
+.modal-actions .danger-button { color: #fff; background: var(--danger); border-color: var(--danger); }
+.modal-actions .danger-button:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 85%, #000); border-color: color-mix(in srgb, var(--danger) 85%, #000); }
+
+/* Forced / voluntary password change */
+.password-change-card .login-sub { margin-bottom: 4px; }
+.profile-menu > button.profile-menu-neutral:hover { color: var(--text); }
