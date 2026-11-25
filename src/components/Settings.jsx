@@ -120,12 +120,12 @@ function ShopFields({ form, onChange, idPrefix, showColour = true }) {
           </label>
         </div>
         <label className="field">
-        <label className="field">
           <span>Receipt printer paper (shop default)</span>
           <select value={form.receipt_paper_width} onChange={(event) => onChange('receipt_paper_width', event.target.value)}>
             {RECEIPT_WIDTHS.map((width) => <option key={width.value} value={width.value}>{width.label}</option>)}
           </select>
         </label>
+        <label className="field">
           <span>Receipt footer message</span>
           <textarea
             value={form.receipt_footer}
@@ -167,8 +167,10 @@ export default function Settings({ userId, organizationShops = [], activeShopId 
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [fontScale, setFontScale] = useState(DEFAULT_FONT_SCALE);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [deviceWidth, setDeviceWidth] = useState(() => getDeviceReceiptWidth());
   const [printerNotice, setPrinterNotice] = useState('');
+
   const [addingShop, setAddingShop] = useState(false);
   const [newShop, setNewShop] = useState(EMPTY_SHOP);
   const [newShopError, setNewShopError] = useState('');
@@ -183,6 +185,7 @@ export default function Settings({ userId, organizationShops = [], activeShopId 
   function updateFontScale(value) {
     setFontScale(saveFontScale(userId, value));
   }
+
   // The shop this device is selling from (any role), for the printer section.
   const deviceShop = organizationShops.find((shop) => shop.id === activeShopId) || null;
   const shopDefaultWidth = deviceShop?.receipt_paper_width || '80mm';
@@ -198,6 +201,7 @@ export default function Settings({ userId, organizationShops = [], activeShopId 
     const ok = printReceipt(sampleReceipt(), deviceShop || { name: 'Test shop' }, effectiveWidth);
     setPrinterNotice(ok ? '' : 'Your browser blocked the receipt window. Allow pop-ups for this site, then try again.');
   }
+
   // Load the full shop list (admins may manage more than one shop),
   // defaulting to the signed-in user's own shop.
   useEffect(() => {

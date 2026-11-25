@@ -173,6 +173,7 @@ export default function SaleEntry({ activeShopId, activeShopName, activeShop = n
   const [checkoutError, setCheckoutError] = useState(null);
   const [lastReceipt, setLastReceipt] = useState(null);
   const [showReprint, setShowReprint] = useState(false);
+  const [printNotice, setPrintNotice] = useState('');
   const [scanNotice, setScanNotice] = useState(null); // { ok, text }
   const [unknownBarcode, setUnknownBarcode] = useState(null);
   const [linkSearch, setLinkSearch] = useState('');
@@ -197,7 +198,7 @@ export default function SaleEntry({ activeShopId, activeShopName, activeShop = n
   useEffect(() => {
     if (pageMode === 'sale') setQuery(initialSearch || '');
   }, [effectiveShopId, initialSearch, pageMode]);
-    // Shop details for the receipt header. Falls back to just the name if the
+  // Shop details for the receipt header. Falls back to just the name if the
   // full shop record has not loaded yet (e.g. offline at start-up).
   const receiptShop = activeShop || { name: activeShopName };
   const cartNeedsPrescription = cart.some((line) => line.requiresPrescription === true);
@@ -444,7 +445,7 @@ export default function SaleEntry({ activeShopId, activeShopName, activeShop = n
     setQuery('');
   }
 
-    function showScanNotice(ok, text) {
+  function showScanNotice(ok, text) {
     window.clearTimeout(scanNoticeTimerRef.current);
     setScanNotice({ ok, text });
     scanNoticeTimerRef.current = window.setTimeout(() => setScanNotice(null), ok ? 2500 : 6000);
@@ -542,7 +543,7 @@ export default function SaleEntry({ activeShopId, activeShopName, activeShop = n
         || drug.generic_name?.toLowerCase().includes(term))
       .slice(0, 8);
   }, [drugs, linkSearch, unknownBarcode]);
-  
+
   function addEquipmentToCart(item) {
     if (!syncStatus.connected || item.available <= 0 || item.selling_price <= 0) return;
     setCart((prev) => {
@@ -651,7 +652,7 @@ export default function SaleEntry({ activeShopId, activeShopName, activeShop = n
       await flushAll(db);
       const remaining = await db.getAll('SELECT status, last_error FROM pending_sales WHERE id = ?', [localId]);
       const queueRow = remaining[0] || null;
-      
+
       // The receipt is built from the cart, so it can be printed even offline.
       // Its number is the sale's own ID, which the server keeps after sync.
       const receipt = {
@@ -711,7 +712,7 @@ export default function SaleEntry({ activeShopId, activeShopName, activeShop = n
       }
 
       setLastReceipt({ items: cart, total, paymentMethod, time: new Date(soldAt), queueRow, receipt });
-      setPrintNotice(''); 
+      setPrintNotice('');
       setCart([]);
       setPrescriptionReference('');
       setPrescriberName('');

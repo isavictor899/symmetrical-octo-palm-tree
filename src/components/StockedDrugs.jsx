@@ -142,7 +142,6 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
   const [barcodeBusy, setBarcodeBusy] = useState(false);
   const [barcodeMessage, setBarcodeMessage] = useState(null); // { ok, text }
 
-
   const selectedShop = allShops.find((shop) => shop.id === selectedShopId);
   const destinationShops = useMemo(
     () => allShops.filter((shop) => shop.id !== selectedShopId),
@@ -460,7 +459,7 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
     }));
   }
 
-    // Barcodes are per organization; RLS returns only this organization's.
+  // Barcodes are per organization; RLS returns only this organization's.
   async function loadBarcodes() {
     const { data, error: barcodeError } = await supabase.from('drug_barcodes').select('barcode, drug_id').order('barcode');
     if (barcodeError) return;

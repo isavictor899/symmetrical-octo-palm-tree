@@ -43,6 +43,7 @@ const Settings = lazy(() => import('./components/Settings'));
 const Finance = lazy(() => import('./components/Finance'));
 const Reports = lazy(() => import('./components/Reports'));
 const StaffManagement = lazy(() => import('./components/StaffManagement'));
+
 // Shop details every page can use; the receipt fields are printed on receipts.
 const SHOP_LIST_FIELDS = 'id, name, theme_color, location, phone, email, kra_pin, ppb_licence_no, receipt_footer, receipt_paper_width';
 
@@ -58,8 +59,8 @@ function NavIcon({ name }) {
     monthlyReport: IconChartBar,
     finance: IconCash,
     register: IconCashRegister,
-    settings: IconSettings,
     staff: IconUsers,
+    settings: IconSettings,
   };
   const Icon = icons[name];
   return Icon ? <Icon size={19} stroke={1.8} aria-hidden="true" focusable="false" /> : null;
@@ -132,7 +133,7 @@ export default function App() {
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const lastSessionUserId = useRef(null);
   const lastSetupUserId = useRef(null);
-    // Loads the shops this user may see. Admins get every shop in their
+  // Loads the shops this user may see. Admins get every shop in their
   // organization; everyone else gets only their own shop.
   async function loadOrganizationShops(scope) {
     const query = supabase.from('shops').select(SHOP_LIST_FIELDS).order('name');
@@ -186,8 +187,9 @@ export default function App() {
         setStaffRole(null);
         setStaffName('');
         setOrganizationShops([]);
+        setActiveShopId(null);
         shopScopeRef.current = null;
-                // Shared tills: the next person must not see the last person's receipts.
+        // Shared tills: the next person must not see the last person's receipts.
         clearRecentReceipts();
         setMustChangePassword(false);
         setAccountInactive(false);
@@ -269,7 +271,7 @@ export default function App() {
     });
     return () => listener.subscription.unsubscribe();
   }, []);
-  
+
   useEffect(() => {
     const handleShopsChanged = () => {
       if (shopScopeRef.current) loadOrganizationShops(shopScopeRef.current);
@@ -309,7 +311,6 @@ export default function App() {
     if ((key === 'dashboard' || key === 'monthlyReport' || key === 'financeExpenses' || key === 'financeIncome' || key === 'financeTransactions' || key.endsWith('Report') || key === 'profitLoss') && !isAdminRole(staffRole)) return false;
     if ((key === 'receive' || key === 'purchaseOrders' || key === 'supplierDebts' || key === 'salesReturns') && !canReceiveStock(staffRole)) return false;
     if (key === 'staff' && !isAdminRole(staffRole)) return false;
-    if (key === 'salesReturns' && !canReceiveStock(staffRole)) return false;
     if (key === 'stockedDrugs' && !canManageStockedDrugs(staffRole)) return false;
     return true;
   });
@@ -384,7 +385,7 @@ export default function App() {
         <div className="app-loading">Loading Pharmacy POS…</div>
       ) : recoveryMode ? (
         <Login recoveryMode onRecoveryComplete={() => setRecoveryMode(false)} />
-            ) : !session ? (
+      ) : !session ? (
         <Login />
       ) : accountInactive ? (
         <div className="login-page">
