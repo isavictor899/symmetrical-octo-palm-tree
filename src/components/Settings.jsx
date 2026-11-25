@@ -11,17 +11,152 @@ import {
   MIN_FONT_SCALE,
   saveFontScale,
 } from '../lib/fontScale';
+import './Settings.css';
+
+const SHOP_FIELDS = 'id, name, theme_color, location, phone, email, kra_pin, ppb_licence_no, receipt_footer';
+
+const EMPTY_SHOP = {
+  name: '',
+  location: '',
+  phone: '',
+  email: '',
+  kra_pin: '',
+  ppb_licence_no: '',
+  receipt_footer: '',
+  theme_color: '',
+};
+
+function shopToForm(shop) {
+  return {
+    name: shop?.name || '',
+    location: shop?.location || '',
+    phone: shop?.phone || '',
+    email: shop?.email || '',
+    kra_pin: shop?.kra_pin || '',
+    ppb_licence_no: shop?.ppb_licence_no || '',
+    receipt_footer: shop?.receipt_footer || '',
+    theme_color: shop?.theme_color || defaultBrandColor,
+  };
+}
+
+function shopRpcArgs(form) {
+  return {
+    p_name: form.name.trim(),
+    p_location: form.location.trim() || null,
+    p_phone: form.phone.trim() || null,
+    p_email: form.email.trim() || null,
+    p_kra_pin: form.kra_pin.replace(/\s/g, '').toUpperCase() || null,
+    p_ppb_licence_no: form.ppb_licence_no.trim() || null,
+    p_receipt_footer: form.receipt_footer.trim() || null,
+    p_theme_color: form.theme_color || null,
+  };
+}
+
+// Quick checks so staff get instant feedback; the database repeats every check.
+function validateShopForm(form) {
+  if (form.name.trim().length < 2) return 'Enter a shop name.';
+  if (form.phone.trim() && !/^\+?[0-9 ()-]{7,20}$/.test(form.phone.trim())) return 'Enter a valid phone number, for example 0712 345 678.';
+  if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email.trim())) return 'Enter a valid email address.';
+  const kra = form.kra_pin.replace(/\s/g, '').toUpperCase();
+  if (kra && !/^[AP][0-9]{9}[A-Z]$/.test(kra)) return 'A KRA PIN is 11 characters, for example P051234567X.';
+  return '';
+}
+
+function announceShopsChanged() {
+  window.dispatchEvent(new Event('pharmacy-pos:shops-changed'));
+}
+
+function ShopFields({ form, onChange, idPrefix, showColour = true }) {
+  return (
+    <>
+      <label className="field">
+        <span>Shop name</span>
+        <input type="text" value={form.name} onChange={(event) => onChange('name', event.target.value)} maxLength={80} required />
+      </label>
+
+      <div className="settings-grid">
+        <label className="field">
+          <span>Location / address</span>
+          <input type="text" value={form.location} onChange={(event) => onChange('location', event.target.value)} placeholder="e.g. Nakuru CBD, Kenyatta Ave" maxLength={160} />
+        </label>
+        <label className="field">
+          <span>Phone</span>
+          <input type="tel" value={form.phone} onChange={(event) => onChange('phone', event.target.value)} placeholder="e.g. 0712 345 678" maxLength={20} />
+        </label>
+        <label className="field">
+          <span>Email (optional)</span>
+          <input type="email" value={form.email} onChange={(event) => onChange('email', event.target.value)} maxLength={254} />
+        </label>
+      </div>
+
+      <fieldset className="settings-fieldset">
+        <legend>Printed on receipts</legend>
+        <div className="settings-grid">
+          <label className="field">
+            <span>KRA PIN</span>
+            <input
+              type="text"
+              value={form.kra_pin}
+              onChange={(event) => onChange('kra_pin', event.target.value.toUpperCase())}
+              placeholder="e.g. P051234567X"
+              maxLength={13}
+              autoCapitalize="characters"
+              aria-describedby={`${idPrefix}-kra-help`}
+            />
+          </label>
+          <label className="field">
+            <span>PPB premises licence no.</span>
+            <input type="text" value={form.ppb_licence_no} onChange={(event) => onChange('ppb_licence_no', event.target.value)} maxLength={40} />
+          </label>
+        </div>
+        <label className="field">
+          <span>Receipt footer message</span>
+          <textarea
+            value={form.receipt_footer}
+            onChange={(event) => onChange('receipt_footer', event.target.value)}
+            placeholder="e.g. Asante kwa kununua! Keep medicines out of reach of children."
+            maxLength={200}
+            rows={2}
+          />
+        </label>
+        <p className="settings-hint" id={`${idPrefix}-kra-help`}>
+          Receipts are not KRA tax invoices. Electronic tax invoices need eTIMS, which is not connected yet.
+        </p>
+      </fieldset>
+
+      {showColour ? (
+        <label className="field color-field">
+          <span>Brand colour</span>
+          <div className="color-row">
+            <input
+              type="color"
+              value={form.theme_color || defaultBrandColor}
+              onChange={(event) => onChange('theme_color', event.target.value)}
+              aria-label="Brand colour"
+            />
+            <span className="color-value">{form.theme_color || defaultBrandColor}</span>
+          </div>
+        </label>
+      ) : null}
+    </>
+  );
+}
 
 export default function Settings({ userId }) {
   const [allShops, setAllShops] = useState([]);
   const [selectedShopId, setSelectedShopId] = useState(null);
-  const [shopName, setShopName] = useState('');
-  const [themeColor, setThemeColor] = useState(defaultBrandColor);
+  const [form, setForm] = useState(EMPTY_SHOP);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const [fontScale, setFontScale] = useState(DEFAULT_FONT_SCALE);
   const [isAdmin, setIsAdmin] = useState(false);
+
+  const [addingShop, setAddingShop] = useState(false);
+  const [newShop, setNewShop] = useState(EMPTY_SHOP);
+  const [newShopError, setNewShopError] = useState('');
+  const [creatingShop, setCreatingShop] = useState(false);
 
   useEffect(() => {
     const savedScale = loadFontScale(userId);
@@ -45,11 +180,10 @@ export default function Settings({ userId }) {
         const { data: sessionData, error: userError } = await supabase.auth.getSession();
         if (userError) throw userError;
         if (!sessionData.session?.user) throw new Error('Please sign in to edit shop settings.');
-        const userData = { user: sessionData.session.user };
 
         const { data: staffRow, error: staffError } = await supabase.from('staff')
           .select('shop_id, role')
-          .eq('auth_user_id', userData.user.id)
+          .eq('auth_user_id', sessionData.session.user.id)
           .maybeSingle();
         if (staffError) throw staffError;
         if (!staffRow?.shop_id) throw new Error('No shop is linked to this account.');
@@ -58,7 +192,7 @@ export default function Settings({ userId }) {
         if (!canEditShopSettings) return;
 
         const { data: shopsData, error: shopsError } = await supabase.from('shops')
-          .select('id, name, theme_color')
+          .select(SHOP_FIELDS)
           .order('name');
         if (shopsError) throw shopsError;
 
@@ -67,59 +201,114 @@ export default function Settings({ userId }) {
           setSelectedShopId(staffRow.shop_id);
         }
       } catch (loadError) {
-        if (!cancelled) {
-          setError(loadError.message || 'Unable to load shop settings.');
-        }
+        if (!cancelled) setError(loadError.message || 'Unable to load shop settings.');
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
 
     loadSettings();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   // Populate the form (and preview the theme) whenever the selected shop changes.
   useEffect(() => {
     const activeShop = allShops.find((shop) => shop.id === selectedShopId);
     if (!activeShop) return;
-    setShopName(activeShop.name || '');
-    setThemeColor(activeShop.theme_color || defaultBrandColor);
+    setForm(shopToForm(activeShop));
     applyBrandTheme(activeShop.theme_color || defaultBrandColor);
   }, [selectedShopId, allShops]);
 
+  function updateForm(field, value) {
+    setForm((previous) => ({ ...previous, [field]: value }));
+    if (field === 'theme_color') applyBrandTheme(value);
+  }
+
+  function updateNewShop(field, value) {
+    setNewShop((previous) => ({ ...previous, [field]: value }));
+  }
+
   async function saveSettings(event) {
     event.preventDefault();
-    if (!selectedShopId) return;
+    if (!selectedShopId || saving) return;
 
-    const trimmedName = shopName.trim();
-    if (!trimmedName) {
-      setError('Shop name is required.');
+    const problem = validateShopForm(form);
+    if (problem) {
+      setError(problem);
       return;
     }
 
     setSaving(true);
     setError('');
+    setMessage('');
 
     try {
-      const { error: saveError } = await supabase
-        .from('shops')
-        .update({ name: trimmedName, theme_color: themeColor })
-        .eq('id', selectedShopId);
+      const { error: saveError } = await supabase.rpc('update_shop_details', {
+        p_shop_id: selectedShopId,
+        ...shopRpcArgs(form),
+      });
       if (saveError) throw saveError;
 
-      setAllShops((previous) => previous.map((shop) =>
-        shop.id === selectedShopId ? { ...shop, name: trimmedName, theme_color: themeColor } : shop
-      ));
-      applyBrandTheme(themeColor);
-      cacheTheme(themeColor);
-      setError('');
+      const { data: refreshed, error: refreshError } = await supabase.from('shops')
+        .select(SHOP_FIELDS)
+        .eq('id', selectedShopId)
+        .maybeSingle();
+      if (refreshError) throw refreshError;
+
+      setAllShops((previous) => previous.map((shop) => (shop.id === selectedShopId ? refreshed : shop)));
+      applyBrandTheme(refreshed?.theme_color || defaultBrandColor);
+      cacheTheme(refreshed?.theme_color || defaultBrandColor);
+      setMessage(`${refreshed?.name || 'Shop'} settings saved.`);
+      announceShopsChanged();
     } catch (saveError) {
       setError(saveError.message || 'Unable to save shop settings.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  function openAddShop() {
+    const current = allShops.find((shop) => shop.id === selectedShopId);
+    setNewShop({ ...EMPTY_SHOP, theme_color: current?.theme_color || defaultBrandColor });
+    setNewShopError('');
+    setMessage('');
+    setAddingShop(true);
+  }
+
+  function closeAddShop() {
+    if (creatingShop) return;
+    setAddingShop(false);
+    setNewShopError('');
+  }
+
+  async function createShop(event) {
+    event.preventDefault();
+    if (creatingShop) return;
+
+    const problem = validateShopForm(newShop);
+    if (problem) {
+      setNewShopError(problem);
+      return;
+    }
+
+    setCreatingShop(true);
+    setNewShopError('');
+    try {
+      const { data: newShopId, error: createError } = await supabase.rpc('create_shop', shopRpcArgs(newShop));
+      if (createError) throw createError;
+
+      const { data: shopsData, error: shopsError } = await supabase.from('shops').select(SHOP_FIELDS).order('name');
+      if (shopsError) throw shopsError;
+
+      setAllShops(shopsData || []);
+      setSelectedShopId(newShopId);
+      setAddingShop(false);
+      setMessage(`${newShop.name.trim()} was added. Next, add or move staff to it from the Staff page, then receive its stock.`);
+      announceShopsChanged();
+    } catch (createError) {
+      setNewShopError(createError.message || 'Unable to add the shop.');
+    } finally {
+      setCreatingShop(false);
     }
   }
 
@@ -188,52 +377,64 @@ export default function Settings({ userId }) {
           </div>
         </section>
 
-        {isAdmin && allShops.length > 1 && (
-          <nav className="shop-switcher" aria-label="Switch shop" style={{ marginBottom: 18 }}>
-            {allShops.map((shop) => (
-              <button
-                key={shop.id}
-                type="button"
-                className={shop.id === selectedShopId ? 'active' : ''}
-                onClick={() => setSelectedShopId(shop.id)}
-              >
-                {shop.name}
-              </button>
-            ))}
-          </nav>
-        )}
-
-        {isAdmin && <form onSubmit={saveSettings} className="settings-form">
-          <label className="field">
-            <span>Shop name</span>
-            <input
-              type="text"
-              value={shopName}
-              onChange={(event) => setShopName(event.target.value)}
-              placeholder="Shop name"
-            />
-          </label>
-
-          <label className="field color-field">
-            <span>Brand colour</span>
-            <div className="color-row">
-              <input
-                type="color"
-                value={themeColor}
-                onChange={(event) => setThemeColor(event.target.value)}
-                aria-label="Brand colour"
-              />
-              <span className="color-value">{themeColor}</span>
+        {isAdmin ? (
+          <section className="settings-shops" aria-labelledby="shop-settings-heading">
+            <div className="settings-shops-header">
+              <div>
+                <h2 id="shop-settings-heading">Shops</h2>
+                <p>{allShops.length === 1 ? '1 shop in your organization.' : `${allShops.length} shops in your organization.`}</p>
+              </div>
+              <button type="button" className="secondary-button" onClick={openAddShop}>Add shop</button>
             </div>
-          </label>
 
-          {error && <div className="settings-error">{error}</div>}
+            {allShops.length > 1 ? (
+              <nav className="shop-switcher" aria-label="Choose shop to edit">
+                {allShops.map((shop) => (
+                  <button
+                    key={shop.id}
+                    type="button"
+                    className={shop.id === selectedShopId ? 'active' : ''}
+                    onClick={() => { setSelectedShopId(shop.id); setMessage(''); setError(''); }}
+                  >
+                    {shop.name}
+                  </button>
+                ))}
+              </nav>
+            ) : null}
 
-          <button type="submit" className="save-button" disabled={saving}>
-            {saving ? 'Saving…' : 'Save settings'}
-          </button>
-        </form>}
+            <form onSubmit={saveSettings} className="settings-form">
+              <ShopFields form={form} onChange={updateForm} idPrefix="edit-shop" />
+
+              {message ? <div className="settings-success" role="status">{message}</div> : null}
+              {error ? <div className="settings-error" role="alert">{error}</div> : null}
+
+              <button type="submit" className="save-button" disabled={saving}>
+                {saving ? 'Saving…' : 'Save settings'}
+              </button>
+            </form>
+          </section>
+        ) : null}
       </div>
+
+      {addingShop ? (
+        <div className="modal-backdrop" role="presentation">
+          <form className="classification-modal settings-shop-modal" onSubmit={createShop}>
+            <div>
+              <h3>Add a shop</h3>
+              <p className="muted small">The new shop joins your organization. It starts with no stock and no staff.</p>
+            </div>
+
+            <ShopFields form={newShop} onChange={updateNewShop} idPrefix="new-shop" />
+
+            {newShopError ? <p className="error">{newShopError}</p> : null}
+
+            <div className="modal-actions">
+              <button type="button" className="secondary-button" onClick={closeAddShop} disabled={creatingShop}>Cancel</button>
+              <button type="submit" disabled={creatingShop}>{creatingShop ? 'Adding…' : 'Add shop'}</button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </main>
   );
 }

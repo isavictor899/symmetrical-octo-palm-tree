@@ -42,6 +42,8 @@ const Settings = lazy(() => import('./components/Settings'));
 const Finance = lazy(() => import('./components/Finance'));
 const Reports = lazy(() => import('./components/Reports'));
 const StaffManagement = lazy(() => import('./components/StaffManagement'));
+// Shop details every page can use; the receipt fields are printed on receipts.
+const SHOP_LIST_FIELDS = 'id, name, theme_color, location, phone, email, kra_pin, ppb_licence_no, receipt_footer';
 
 
 function NavIcon({ name }) {
@@ -129,6 +131,22 @@ export default function App() {
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const lastSessionUserId = useRef(null);
   const lastSetupUserId = useRef(null);
+    // Loads the shops this user may see. Admins get every shop in their
+  // organization; everyone else gets only their own shop.
+  async function loadOrganizationShops(scope) {
+    const query = supabase.from('shops').select(SHOP_LIST_FIELDS).order('name');
+    const { data: shopsData, error: shopsError } = scope.admin && scope.organizationId
+      ? await query.eq('organization_id', scope.organizationId)
+      : await query.eq('id', scope.shopId);
+    if (shopsError) {
+      console.warn('[App] shops lookup warning:', shopsError.message);
+      return;
+    }
+    setOrganizationShops(shopsData || []);
+  }
+  // Which shops this user may see: { admin, organizationId, shopId }. Kept so the
+  // list can be reloaded after an admin adds or renames a shop in Settings.
+  const shopScopeRef = useRef(null);
 
   // Apply a cached color instantly on first paint, before any network
   // call resolves — avoids a flash of the default color on every load.
@@ -167,7 +185,7 @@ export default function App() {
         setStaffRole(null);
         setStaffName('');
         setOrganizationShops([]);
-        setActiveShopId(null);
+        shopScopeRef.current = null;
         setMustChangePassword(false);
         setAccountInactive(false);
         setShowPasswordChange(false);
@@ -215,17 +233,12 @@ export default function App() {
         }
 
         if (data?.shop_id) {
-          const admin = isAdminRole(data.role);
-          const organizationId = data.shops?.organization_id;
-          const shopsQuery = admin && organizationId
-            ? supabase.from('shops').select('id, name, theme_color').eq('organization_id', organizationId).order('name')
-            : supabase.from('shops').select('id, name, theme_color').eq('id', data.shop_id).order('name');
-          const { data: shopsData, error: shopsError } = await shopsQuery;
-          if (shopsError) {
-            console.warn('[App] shops lookup warning:', shopsError.message);
-          } else {
-            setOrganizationShops(shopsData || []);
-          }
+          shopScopeRef.current = {
+            admin: isAdminRole(data.role),
+            organizationId: data.shops?.organization_id,
+            shopId: data.shop_id,
+          };
+          await loadOrganizationShops(shopScopeRef.current);
         }
 
         // Apply this shop's real saved color (falls back to default if
@@ -252,6 +265,14 @@ export default function App() {
       setSessionAndRole(nextSession);
     });
     return () => listener.subscription.unsubscribe();
+  }, []);
+  
+  useEffect(() => {
+    const handleShopsChanged = () => {
+      if (shopScopeRef.current) loadOrganizationShops(shopScopeRef.current);
+    };
+    window.addEventListener('pharmacy-pos:shops-changed', handleShopsChanged);
+    return () => window.removeEventListener('pharmacy-pos:shops-changed', handleShopsChanged);
   }, []);
 
   useEffect(() => {

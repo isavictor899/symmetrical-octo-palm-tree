@@ -1,0 +1,20 @@
+.settings-shops { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--border); }
+.settings-shops-header { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.settings-shops-header h2 { margin: 0; font-size: 1rem; }
+.settings-shops-header p { margin: 4px 0 0; color: var(--text-muted); font-size: 0.8125rem; }
+.settings-shops .shop-switcher { margin-bottom: 18px; }
+
+.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+
+.settings-fieldset { display: grid; gap: 14px; margin: 0; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); }
+.settings-fieldset legend { padding: 0 6px; color: var(--text-muted); font-size: 0.75rem; font-weight: 700; }
+.settings-fieldset textarea { resize: vertical; min-height: 58px; }
+.settings-hint { margin: 0; color: var(--text-muted); font-size: 0.75rem; }
+
+.settings-success { padding: 9px 11px; border-radius: var(--radius); color: var(--success); background: var(--success-bg); font-size: 0.8125rem; }
+
+.settings-shop-modal { display: grid; gap: 14px; width: min(600px, 100%); max-height: calc(100vh - 36px); overflow-y: auto; }
+
+@media (max-width: 520px) {
+  .settings-shops-header { flex-direction: column; }
+}
