@@ -96,3 +96,63 @@ button.console-stat:hover { border-color: var(--border-strong); }
 .console-shell .staff-credentials dd { margin: 0; font-weight: 700; word-break: break-all; }
 .console-shell .staff-row-inactive td { opacity: 0.65; }
 .console-shell .modal-actions .danger-button { color: #fff; background: var(--danger); border-color: var(--danger); }
+
+/* Section navigation */
+.console-nav { position: sticky; top: 61px; z-index: 9; display: flex; gap: 2px; overflow-x: auto; padding: 0 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.console-nav button { flex: 0 0 auto; padding: 11px 14px; border: 0; border-bottom: 2px solid transparent; color: var(--text-muted); background: transparent; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.console-nav button.active { color: var(--text); border-bottom-color: var(--brand-primary); }
+.console-section-title { margin: 22px 0 10px; font-size: 1rem; }
+.console-support-note { margin: 12px 0; }
+.console-shell .staff-you { margin-left: 8px; padding: 1px 7px; border-radius: 999px; color: var(--brand-primary); background: var(--brand-tint); font-size: 0.6875rem; font-weight: 700; }
+.console-role { font-weight: 600; }
+
+/* Plans & features */
+.console-matrix td, .console-matrix th { vertical-align: top; }
+.console-matrix-limit { font-weight: 500; text-transform: none; letter-spacing: 0; }
+.console-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.console-switch input { width: 18px; height: 18px; }
+.console-features { align-content: start; }
+.console-feature-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.console-feature-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.875rem; }
+.console-feature-list select { width: auto; min-height: 32px; font-size: 0.8125rem; }
+.console-feature-state { margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 0.6875rem; font-weight: 700; }
+.console-feature-state.on { color: var(--success); background: var(--success-bg); }
+.console-feature-state.off { color: var(--text-muted); background: var(--surface-subtle); }
+
+/* Announcements */
+.console-announcements { display: grid; gap: 10px; }
+.console-announcement { display: grid; gap: 6px; padding: 14px; border: 1px solid var(--border); border-left-width: 4px; border-radius: var(--radius); background: var(--surface); }
+.console-announcement.info { border-left-color: #2768b2; }
+.console-announcement.warning { border-left-color: var(--warning); }
+.console-announcement.critical { border-left-color: var(--danger); }
+.console-announcement header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.console-announcement p { margin: 0; }
+.console-ann-status { padding: 2px 8px; border-radius: 999px; font-size: 0.6875rem; font-weight: 700; }
+.console-ann-status.live { color: var(--success); background: var(--success-bg); }
+.console-ann-status.scheduled { color: #2768b2; background: #e9f1fb; }
+.console-ann-status.ended { color: var(--text-muted); background: var(--surface-subtle); }
+
+/* Reminders */
+.console-reminder-setup { margin-bottom: 8px; }
+.console-setup-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.console-setup-list li { padding: 4px 10px; border-radius: 999px; font-size: 0.8125rem; font-weight: 600; }
+.console-setup-list li.ok { color: var(--success); background: var(--success-bg); }
+.console-setup-list li.off { color: var(--text-muted); background: var(--surface-subtle); }
+.console-reminder-message { min-width: 260px; font-size: 0.8125rem; color: var(--text-muted); }
+
+/* MFA */
+.console-mfa { gap: 12px; }
+.console-mfa-qr { display: block; width: 200px; height: 200px; margin: 4px auto; border: 1px solid var(--border); border-radius: var(--radius); background: #fff; }
+.console-mfa-secret { font-size: 0.8125rem; letter-spacing: 0.04em; word-break: break-all; }
+.console-mfa-form { display: grid; gap: 10px; }
+.console-mfa-form input { min-height: 48px; font-size: 1.5rem; letter-spacing: 0.4em; text-align: center; }
+.console-mfa-error { margin: 0; color: var(--danger); font-size: 0.875rem; }
+.console-mfa-signout { justify-self: center; padding: 4px; border: 0; color: var(--text-muted); background: none; text-decoration: underline; cursor: pointer; }
+
+@media (max-width: 640px) {
+  .console-nav { top: 0; position: static; padding: 0 12px; }
+}
+
+/* The app right-aligns the 4th table column (amounts); not wanted here. */
+.console-shell .console-matrix th, .console-shell .console-matrix td,
+.console-shell .console-reminders th, .console-shell .console-reminders td { text-align: left; }

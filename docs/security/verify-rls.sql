@@ -41,7 +41,12 @@ app_callable(name) as (
     ('platform_is_admin'), ('platform_overview'), ('platform_organizations'),
     ('platform_organization_detail'), ('platform_set_plan'), ('platform_record_payment'),
     ('platform_void_payment'), ('platform_set_dates'), ('platform_set_suspended'),
-    ('platform_save_notes')
+    ('platform_save_notes'), ('platform_require'), ('platform_me'), ('platform_team'),
+    ('platform_set_admin_role'), ('platform_remove_admin'), ('platform_team_activity'),
+    ('platform_feature_matrix'), ('platform_set_plan_feature'), ('platform_set_org_feature'),
+    ('platform_org_features'), ('platform_announcements_list'), ('platform_save_announcement'),
+    ('platform_end_announcement'), ('platform_reminders'), ('platform_mark_reminder_sent'),
+    ('get_my_announcements')
 ),
 public_tables as (
   select c.oid, c.relname, c.relrowsecurity

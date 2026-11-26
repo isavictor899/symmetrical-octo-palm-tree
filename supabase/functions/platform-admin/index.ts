@@ -1,12 +1,17 @@
 // platform-admin: Enora Labs console actions that need the service role.
 //
-//   onboard               create a pharmacy: organization, first shop, and the
-//                         owner's admin login with a temporary password
-//   reset_admin_password  give a pharmacy administrator a new temporary password
+//   onboard               (owner) create a pharmacy: organization, first shop,
+//                         and the owner's admin login with a temporary password
+//   reset_admin_password  (support) new temporary password for a pharmacy admin
+//   add_team_member       (owner) add someone to the console team; creates a
+//                         login with a temporary password if they have none
+//   reset_member_mfa      (owner) remove a console member's authenticator so
+//                         they set it up again (lost phone); not your own
 //
-// The caller's JWT is verified with Supabase Auth, then every SQL function
-// re-checks that the caller is in platform_admins. The temporary password is
-// generated here and returned once; it is never stored or logged.
+// The caller's JWT is verified with Supabase Auth, then platform_require runs
+// with the caller's own token: it checks their console role AND that the
+// session passed MFA. The SQL functions then re-check the role. Temporary
+// passwords are generated here and returned once; never stored or logged.
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.45.4';
 
@@ -87,6 +92,13 @@ Deno.serve(async (request) => {
     const body = await request.json().catch(() => ({}));
     const action = text(body?.action, 40);
 
+    // Role and MFA, checked with the caller's own session (aal2 lives in it).
+    const minRole = action === 'reset_admin_password' ? 'support' : 'owner';
+    const { error: requireError } = await userClient.rpc('platform_require', { p_min_role: minRole });
+    if (requireError) {
+      return json({ error: requireError.code === 'P0001' ? requireError.message : 'Could not check your console access.' }, 403);
+    }
+
     switch (action) {
       case 'onboard': {
         const orgName = text(body.organization_name, 120);
@@ -151,6 +163,62 @@ Deno.serve(async (request) => {
           throw new UserError('The password could not be reset. Please try again.', 500);
         }
         return json({ email: target.email, temporary_password: password });
+      }
+
+      case 'add_team_member': {
+        const email = text(body.email, 254).toLowerCase();
+        const role = text(body.role, 20).toLowerCase();
+        const fullName = text(body.full_name, 80);
+        if (!EMAIL_PATTERN.test(email)) throw new UserError('Enter a valid email.');
+        if (role !== 'owner' && role !== 'support') throw new UserError('Choose owner or support.');
+
+        // Someone who already has a login (e.g. pharmacy staff) keeps their
+        // password; otherwise they get a new login with a temporary one.
+        const existing = await rpc(admin, 'platform_find_login', { p_email: email }) as string | null;
+        let userId = existing;
+        let password: string | null = null;
+        if (!userId) {
+          password = temporaryPassword();
+          const { data: created, error: createError } = await admin.auth.admin.createUser({
+            email, password, email_confirm: true, user_metadata: { full_name: fullName },
+          });
+          if (createError || !created?.user) {
+            console.error('[platform-admin] createUser (team) failed:', createError?.message);
+            throw new UserError('The login could not be created. Please try again.', 500);
+          }
+          userId = created.user.id;
+        }
+        try {
+          await rpc(admin, 'platform_add_admin', { p_actor: actor, p_user: userId, p_email: email, p_role: role });
+        } catch (error) {
+          if (!existing && userId) {
+            await admin.auth.admin.deleteUser(userId).catch((cleanupError) =>
+              console.error('[platform-admin] cleanup deleteUser failed:', cleanupError));
+          }
+          throw error;
+        }
+        return json({ email, temporary_password: password, existing_login: Boolean(existing) });
+      }
+
+      case 'reset_member_mfa': {
+        const userId = text(body.user_id, 40);
+        if (!UUID_PATTERN.test(userId)) throw new UserError('Choose a console member.');
+        if (userId === actor) throw new UserError('You cannot reset your own authenticator. Ask another owner.');
+        await rpc(admin, 'platform_assert_member', { p_actor: actor, p_user: userId });
+        const { data: factors, error: listError } = await admin.auth.admin.mfa.listFactors({ userId });
+        if (listError) {
+          console.error('[platform-admin] listFactors failed:', listError.message);
+          throw new UserError('Could not read their authenticator setup. Please try again.', 500);
+        }
+        for (const factor of factors?.factors || []) {
+          const { error: deleteError } = await admin.auth.admin.mfa.deleteFactor({ userId, id: factor.id });
+          if (deleteError) {
+            console.error('[platform-admin] deleteFactor failed:', deleteError.message);
+            throw new UserError('Could not reset their authenticator. Please try again.', 500);
+          }
+        }
+        // They set up a new authenticator at their next sign-in.
+        return json({ ok: true, removed: (factors?.factors || []).length });
       }
 
       default:

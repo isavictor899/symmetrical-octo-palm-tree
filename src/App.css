@@ -544,3 +544,13 @@ textarea { resize: vertical; }
 .subscription-banner.warning { color: var(--warning); background: var(--warning-bg); }
 .subscription-banner.danger { color: var(--danger); background: var(--danger-bg); }
 @media (max-width: 720px) { .subscription-banner { margin: 10px 12px 0; } }
+
+/* Announcements from Enora Labs */
+.announcement-stack { display: grid; gap: 8px; margin: 12px 24px 0; }
+.announcement { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 10px 14px; border-left: 4px solid; border-radius: var(--radius); font-size: 0.8125rem; line-height: 1.5; }
+.announcement div { display: grid; gap: 2px; }
+.announcement button { flex: 0 0 auto; padding: 3px 10px; border: 1px solid currentColor; border-radius: var(--radius-sm); color: inherit; background: transparent; font-size: 0.75rem; font-weight: 700; cursor: pointer; }
+.announcement.info { color: #1f4f86; background: #e9f1fb; border-color: #2768b2; }
+.announcement.warning { color: var(--warning); background: var(--warning-bg); border-color: var(--warning); }
+.announcement.critical { color: var(--danger); background: var(--danger-bg); border-color: var(--danger); }
+@media (max-width: 720px) { .announcement-stack { margin: 10px 12px 0; } }

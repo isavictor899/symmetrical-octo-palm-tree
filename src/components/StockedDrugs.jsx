@@ -104,7 +104,9 @@ function buildPendingStockMaps(pendingSalesRows = [], pendingReceiptRows = []) {
   return { pendingSalesQtyByBatch, pendingReceiptQtyByDrug };
 }
 
-export default function StockedDrugs({ activeShopId, organizationShops = [], onActiveShopChange, dataVersion = 0, isActive = true }) {
+export default function StockedDrugs({ activeShopId, organizationShops = [], onActiveShopChange, dataVersion = 0, isActive = true, subscription = null }) {
+  // Transfers between shops are a plan feature; the server refuses them too.
+  const transfersAllowed = !Array.isArray(subscription?.features) || subscription.features.includes('stock_transfers');
   const db = usePowerSync();
   const gate = useRefreshGate(isActive, dataVersion);
   const showingShopRef = useRef(null);
@@ -781,14 +783,16 @@ export default function StockedDrugs({ activeShopId, organizationShops = [], onA
                         <button type="button" className="table-action" onClick={() => openClassificationEditor(item)}>
                           Edit classification
                         </button>
-                        <button
-                          type="button"
-                          className="table-action"
-                          onClick={() => openTransferDialog(item)}
-                          disabled={!staff?.isAdmin || item.batches.filter((batch) => !isExpiredBatch(batch)).length === 0 || destinationShops.length === 0}
-                        >
-                          Transfer
-                        </button>
+                        {transfersAllowed ? (
+                          <button
+                            type="button"
+                            className="table-action"
+                            onClick={() => openTransferDialog(item)}
+                            disabled={!staff?.isAdmin || item.batches.filter((batch) => !isExpiredBatch(batch)).length === 0 || destinationShops.length === 0}
+                          >
+                            Transfer
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className="table-action danger"

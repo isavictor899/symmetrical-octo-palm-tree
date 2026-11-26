@@ -36,6 +36,7 @@ import { clearRecentReceipts } from './lib/receipt';
 import { cachedSubscription, fetchSubscription } from './lib/subscription';
 import { SUPPORT } from './lib/support';
 import SubscriptionBanner from './components/SubscriptionBanner';
+import AnnouncementBar from './components/AnnouncementBar';
 import './App.css';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -97,6 +98,18 @@ function usePwaUpdateToast() {
 
   return { showUpdateToast, refreshApp };
 }
+
+// Pages that belong to a plan feature (see Plans & features in the console).
+// The server refuses the writes too; hiding the page just avoids a dead end.
+const PAGE_FEATURES = {
+  purchaseOrders: 'purchase_orders',
+  financeExpenses: 'finance',
+  financeIncome: 'finance',
+  financeTransactions: 'finance',
+  monthlyReport: 'ai_insights',
+  purchaseReport: 'advanced_reports',
+  profitLoss: 'advanced_reports',
+};
 
 const pages = {
   dashboard: { label: 'Dashboard', icon: 'dashboard', component: Dashboard, group: 'Overview' },
@@ -356,6 +369,8 @@ export default function App() {
     if ((key === 'receive' || key === 'purchaseOrders' || key === 'supplierDebts' || key === 'salesReturns') && !canReceiveStock(staffRole)) return false;
     if ((key === 'staff' || key === 'salesReview') && !isAdminRole(staffRole)) return false;
     if (key === 'stockedDrugs' && !canManageStockedDrugs(staffRole)) return false;
+    // Unknown features (offline, never fetched) leave every page visible.
+    if (PAGE_FEATURES[key] && Array.isArray(subscription?.features) && !subscription.features.includes(PAGE_FEATURES[key])) return false;
     return true;
   });
 
@@ -371,7 +386,9 @@ export default function App() {
   const profileName = staffName || session?.user?.email || 'Staff member';
   const profileInitials = profileName.split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((part) => part[0].toUpperCase()).join('') || 'U';
   const profileRole = String(staffRole || 'Staff').replace(/[_-]+/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
-  const activePageEntry = Object.entries(pages).find(([key]) => key === page) || Object.entries(pages)[0];
+  // Only pages this person may open; a page that becomes unavailable (role or
+  // plan change) falls back to the first one they can use.
+  const activePageEntry = availablePages.find(([key]) => key === page) || availablePages[0] || Object.entries(pages)[0];
   const ActivePageComponent = activePageEntry?.[1]?.component;
   const navGroups = availablePages.reduce((groups, [key, item]) => {
     const group = item.group || 'Workspace';
@@ -543,6 +560,7 @@ export default function App() {
           </header>
           <main className="app-content">
             <SubscriptionBanner subscription={subscription} isAdmin={isAdminRole(staffRole)} />
+            <AnnouncementBar userId={session.user.id} />
             {ActivePageComponent ? (
               <div className="app-page-panel" aria-live="polite">
                 <PageErrorBoundary key={page}>
