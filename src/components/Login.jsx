@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { IconPill } from '@tabler/icons-react';
 import { supabase } from '../lib/supabaseClient';
+import { MIN_NEW_PASSWORD, newPasswordProblem } from '../lib/passwordCheck';
 
 export default function Login({ recoveryMode = false, onRecoveryComplete }) {
   const [email, setEmail] = useState('');
@@ -51,16 +52,19 @@ export default function Login({ recoveryMode = false, onRecoveryComplete }) {
     e.preventDefault();
     setError(null);
     setMessage(null);
-    if (password.length < 6) {
-      setError('Your password must be at least 6 characters.');
-      return;
-    }
     if (password !== confirmPassword) {
       setError('The passwords do not match.');
       return;
     }
 
     setLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    const problem = await newPasswordProblem(password, user?.email || '');
+    if (problem) {
+      setError(problem);
+      setLoading(false);
+      return;
+    }
     const { error } = await supabase.auth.updateUser({ password });
     if (error) {
       setError(error.message);
@@ -88,7 +92,7 @@ export default function Login({ recoveryMode = false, onRecoveryComplete }) {
           <span>Pharmacy POS</span>
         </div>
         <h1 className="login-title">{title}</h1>
-        <p className="login-sub">{isUpdate ? 'Enter and confirm your new password.' : isResetRequest ? 'Enter your staff email and we’ll send a reset link.' : 'Use your staff login to open the till.'}</p>
+        <p className="login-sub">{isUpdate ? `Enter and confirm your new password (at least ${MIN_NEW_PASSWORD} characters).` : isResetRequest ? 'Enter your staff email and we’ll send a reset link.' : 'Use your staff login to open the till.'}</p>
 
         {!isUpdate && <label className="field">
           <span>Email</span>
@@ -107,8 +111,8 @@ export default function Login({ recoveryMode = false, onRecoveryComplete }) {
         </label>}
 
         {isUpdate && <>
-          <label className="field"><span>New password</span><input type="password" required minLength={6} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
-          <label className="field"><span>Confirm new password</span><input type="password" required minLength={6} autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></label>
+          <label className="field"><span>New password</span><input type="password" required minLength={MIN_NEW_PASSWORD} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+          <label className="field"><span>Confirm new password</span><input type="password" required minLength={MIN_NEW_PASSWORD} autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></label>
         </>}
 
         {error && <div className="login-error" role="alert">{error}</div>}

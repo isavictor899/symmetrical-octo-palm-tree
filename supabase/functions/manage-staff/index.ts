@@ -7,6 +7,11 @@
 //      the target is in their organization,
 //   3. performs the Supabase Auth step (create / ban / unban / set password).
 //
+// Passwords: at least 10 characters, and never one that appears in a known
+// data breach (Have I Been Pwned, k-anonymity: only the first 5 characters of
+// the SHA-1 hash leave this function). Changing your own password also needs
+// the current one; every device using that login is signed out.
+//
 // Actions: list, create, update, set_active, reset_password, change_own_password.
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.45.4';
@@ -21,7 +26,7 @@ const corsHeaders = {
 const ROLES = new Set(['admin', 'pharmacist', 'cashier']);
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MIN_PASSWORD = 8;
+const MIN_PASSWORD = 10;
 const BAN_FOREVER = '876000h'; // ~100 years
 
 class UserError extends Error {
@@ -46,13 +51,51 @@ function requireUuid(value: unknown, label: string) {
   return id;
 }
 
-function requirePassword(value: unknown) {
+function requirePassword(value: unknown, email?: string | null) {
   const password = String(value ?? '');
   if (password.length < MIN_PASSWORD) {
     throw new UserError(`The password must be at least ${MIN_PASSWORD} characters.`);
   }
   if (password.length > 72) throw new UserError('The password is too long.');
+  if (/^(.)\1+$/.test(password)) throw new UserError('Choose a password that is not one character repeated.');
+  const lower = password.toLowerCase();
+  const localPart = (email || '').toLowerCase().split('@')[0];
+  if (email && (lower === email.toLowerCase() || (localPart.length >= 4 && lower.includes(localPart)))) {
+    throw new UserError('Choose a password that does not contain the email address.');
+  }
   return password;
+}
+
+// Have I Been Pwned range API. If the service cannot be reached we allow the
+// password (the length rules still apply) rather than lock people out.
+async function assertNotBreached(password: string) {
+  try {
+    const digest = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(password));
+    const hash = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+    const prefix = hash.slice(0, 5);
+    const suffix = hash.slice(5);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const response = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`, {
+      headers: { 'Add-Padding': 'true', 'User-Agent': 'enora-pharmacy-pos' },
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer));
+    if (!response.ok) {
+      console.warn('[manage-staff] breach check unavailable:', response.status);
+      return;
+    }
+    const body = await response.text();
+    const found = body.split('\n').some((line) => {
+      const [candidate, count] = line.trim().split(':');
+      return candidate === suffix && Number(count) > 0;
+    });
+    if (found) {
+      throw new UserError('This password has appeared in a data breach and is easy to guess. Choose a different one.');
+    }
+  } catch (error) {
+    if (error instanceof UserError) throw error;
+    console.warn('[manage-staff] breach check skipped:', error instanceof Error ? error.message : 'unknown');
+  }
 }
 
 function requireRole(value: unknown) {
@@ -121,8 +164,9 @@ Deno.serve(async (request) => {
         const phone = text(body.phone, 20);
         const role = requireRole(body.role);
         const shopId = requireUuid(body.shop_id, 'shop');
-        const password = requirePassword(body.password);
         if (!EMAIL_PATTERN.test(email)) throw new UserError('Enter a valid email address.');
+        const password = requirePassword(body.password, email);
+        await assertNotBreached(password);
 
         // Authorise BEFORE creating a login, so a refused request leaves nothing behind.
         await rpc(admin, 'staff_admin_check_create', {
@@ -193,6 +237,7 @@ Deno.serve(async (request) => {
 
       case 'reset_password': {
         const password = requirePassword(body.password);
+        await assertNotBreached(password);
         const login = await rpc(admin, 'staff_admin_mark_password_reset', {
           p_actor: actor,
           p_staff_id: requireUuid(body.staff_id, 'staff member'),
@@ -202,9 +247,22 @@ Deno.serve(async (request) => {
       }
 
       case 'change_own_password': {
-        const password = requirePassword(body.password);
+        const currentPassword = String(body.current_password ?? '');
+        if (!currentPassword) throw new UserError('Enter your current password.');
+        const password = requirePassword(body.password, user.email);
+        if (password === currentPassword) throw new UserError('The new password must be different from the current one.');
+        // Checked against the stored hash in the database (rate limited there:
+        // 5 wrong attempts per 15 minutes), not by signing in again.
+        const correct = await rpc(admin, 'staff_verify_own_password', { p_actor: actor, p_password: currentPassword });
+        if (correct !== true) throw new UserError('Your current password is not correct.', 403);
+
+        await assertNotBreached(password);
         await authStep(admin.auth.admin.updateUserById(actor, { password }), 'change password');
         await rpc(admin, 'staff_self_password_changed', { p_actor: actor });
+
+        // Supabase ends ALL of this user's sessions when the password is set
+        // here, including the caller's; the app signs in again with the new
+        // password straight after (see ChangePassword.jsx).
         return json({ ok: true });
       }
 

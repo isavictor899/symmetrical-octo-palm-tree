@@ -5,7 +5,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://gdgoofbcbmwmzuwwrcbd.supabase.co wss://gdgoofbcbmwmzuwwrcbd.supabase.co https://6aad486302481fb31b978b55.powersync.journeyapps.com wss://6aad486302481fb31b978b55.powersync.journeyapps.com; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
+          "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://gdgoofbcbmwmzuwwrcbd.supabase.co wss://gdgoofbcbmwmzuwwrcbd.supabase.co https://6aad486302481fb31b978b55.powersync.journeyapps.com wss://6aad486302481fb31b978b55.powersync.journeyapps.com https://api.pwnedpasswords.com; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
         },
         { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains" },
         { "key": "X-Frame-Options", "value": "DENY" },

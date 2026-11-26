@@ -1,0 +1,197 @@
+-- Shared fixtures for the database tests. Each test file includes this with
+-- \ir right after BEGIN. Everything here (pgTAP itself, the helper functions,
+-- the test pharmacy, its logins and stock) exists only inside that test's
+-- transaction and disappears at its ROLLBACK, so the tests can run against
+-- any copy of the database, production included, without leaving anything.
+--
+-- Naming: every fixture has a short key ('org', 'shopA', 'cashier', ...).
+-- pg_temp.fx('<key>') returns its id. For people, pg_temp.fx('<key>') is the
+-- login (auth user id) and pg_temp.fx('<key>.staff') is the staff row.
+--
+-- Acting as someone: select pg_temp.act_as('<key>'); switches to the
+-- 'authenticated' role with that person's JWT claims, exactly like a request
+-- from the app (RLS applies). Go back to the database owner with:
+--   reset role;
+-- Helpers that create data must be called as the owner (after reset role).
+
+create extension if not exists pgtap with schema extensions;
+
+create temp table fx (key text primary key, id uuid not null);
+grant select on fx to public;
+
+-- VOLATILE on purpose: a STABLE function can be evaluated while a statement
+-- is being planned, with a snapshot that does not yet see fixtures created
+-- earlier in the same DO block.
+create function pg_temp.fx(p_key text) returns uuid
+language plpgsql volatile as $$
+declare v uuid;
+begin
+  select id into v from fx where key = p_key;
+  if v is null then raise exception 'No test fixture called %', p_key; end if;
+  return v;
+end $$;
+
+-- A login (auth user) with the password 'Test-Password-1'.
+create function pg_temp.new_user(p_key text) returns uuid
+language plpgsql as $$
+declare v uuid := gen_random_uuid();
+begin
+  insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
+                          created_at, updated_at, raw_app_meta_data, raw_user_meta_data)
+  values (v, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+          p_key || '-' || v || '@tests.invalid', extensions.crypt('Test-Password-1', extensions.gen_salt('bf', 4)),
+          now(), now(), now(), '{"provider":"email","providers":["email"]}', '{}');
+  insert into fx values (p_key, v);
+  return v;
+end $$;
+
+-- A pharmacy. No trial or paid-until date = complimentary (never expires).
+create function pg_temp.new_org(p_key text, p_plan text default 'enterprise') returns uuid
+language plpgsql as $$
+declare v uuid;
+begin
+  insert into public.organizations (name, plan) values ('Test pharmacy ' || p_key, p_plan) returning id into v;
+  insert into fx values (p_key, v);
+  return v;
+end $$;
+
+create function pg_temp.new_shop(p_key text, p_org_key text) returns uuid
+language plpgsql as $$
+declare v uuid;
+begin
+  insert into public.shops (name, organization_id) values ('Test shop ' || p_key, pg_temp.fx(p_org_key)) returning id into v;
+  insert into fx values (p_key, v);
+  return v;
+end $$;
+
+-- A staff member with their own login. Returns the login id.
+create function pg_temp.new_staff(p_key text, p_shop_key text, p_role text) returns uuid
+language plpgsql as $$
+declare v_user uuid; v_staff uuid;
+begin
+  v_user := pg_temp.new_user(p_key);
+  insert into public.staff (shop_id, full_name, role, auth_user_id, email, is_active, must_change_password)
+  values (pg_temp.fx(p_shop_key), 'Test ' || p_key, p_role, v_user, p_key || '@tests.invalid', true, false)
+  returning id into v_staff;
+  insert into fx values (p_key || '.staff', v_staff);
+  return v_user;
+end $$;
+
+-- Request claims for a login, as Supabase sets them for an API call.
+create function pg_temp.claims_for(p_key text, p_aal text default 'aal1') returns void
+language plpgsql as $$
+begin
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', pg_temp.fx(p_key), 'role', 'authenticated', 'aal', p_aal)::text, true);
+end $$;
+
+create function pg_temp.act_as(p_key text, p_aal text default 'aal1') returns void
+language plpgsql as $$
+begin
+  perform pg_temp.claims_for(p_key, p_aal);
+  perform set_config('role', 'authenticated', true);
+end $$;
+
+-- A catalogue drug (not prescription-only unless asked).
+create function pg_temp.new_drug(p_key text, p_requires_prescription boolean default false) returns uuid
+language plpgsql as $$
+declare v uuid;
+begin
+  insert into public.drugs (name, generic_name, requires_prescription)
+  values ('Test drug ' || p_key || ' ' || left(gen_random_uuid()::text, 8), 'testamol', p_requires_prescription)
+  returning id into v;
+  insert into fx values (p_key, v);
+  return v;
+end $$;
+
+-- Receives stock through the real receive_stock function, as p_by (an admin
+-- or pharmacist key). Returns the batch id.
+create function pg_temp.receive(p_key text, p_shop_key text, p_drug_key text, p_by text,
+                                p_price numeric default 100, p_quantity int default 50,
+                                p_expiry date default (current_date + 365)) returns uuid
+language plpgsql as $$
+declare v uuid;
+begin
+  perform pg_temp.claims_for(p_by);
+  v := public.receive_stock(pg_temp.fx(p_shop_key), pg_temp.fx(p_drug_key), null, 'Test supplier',
+                            'B-' || p_key, p_expiry, round(p_price * 0.6, 2), p_price, p_quantity,
+                            gen_random_uuid(), false, false);
+  perform set_config('request.jwt.claims', '', true);
+  insert into fx values (p_key, v);
+  return v;
+end $$;
+
+-- One sale line for record_sale_with_discounts / sell_stock_with_amount_discounts.
+create function pg_temp.line(p_batch_key text, p_quantity int, p_price numeric, p_discount numeric default 0) returns jsonb
+language sql stable as $$
+  select jsonb_build_object(
+    'item_type', 'drug',
+    'batch_id', pg_temp.fx(p_batch_key),
+    'drug_id', (select b.drug_id from public.batches b where b.id = pg_temp.fx(p_batch_key)),
+    'quantity', p_quantity,
+    'original_unit_price', p_price,
+    'discount_amount', p_discount,
+    'unit_price', p_price - p_discount)
+$$;
+
+-- Records a sale as the given person, the way the till uploads it.
+create function pg_temp.sell(p_key text, p_by text, p_shop_key text, p_items jsonb,
+                             p_sold_at timestamptz default now(), p_payment text default 'cash') returns uuid
+language plpgsql as $$
+declare v uuid;
+begin
+  perform pg_temp.claims_for(p_by);
+  v := public.sell_stock_with_amount_discounts(pg_temp.fx(p_shop_key), p_payment, p_items, gen_random_uuid(),
+                                               null, null, null, pg_temp.fx(p_by), p_sold_at);
+  perform set_config('request.jwt.claims', '', true);
+  insert into fx values (p_key, v);
+  return v;
+end $$;
+
+create function pg_temp.stock_left(p_batch_key text) returns int
+language sql stable as $$ select quantity_remaining from public.batches where id = pg_temp.fx(p_batch_key) $$;
+
+-- Returns part of a sale line through the real return_sold_drug, as p_by.
+create function pg_temp.return_item(p_key text, p_by text, p_sale_key text, p_quantity int,
+                                    p_method text default 'cash', p_reason text default 'Wrong strength dispensed',
+                                    p_client uuid default gen_random_uuid()) returns uuid
+language plpgsql as $$
+declare v uuid;
+begin
+  perform pg_temp.claims_for(p_by);
+  v := public.return_sold_drug((select si.id from public.sale_items si where si.sale_id = pg_temp.fx(p_sale_key) order by si.id limit 1),
+                               p_quantity, p_method, p_reason, p_client);
+  perform set_config('request.jwt.claims', '', true);
+  insert into fx values (p_key, v) on conflict (key) do update set id = excluded.id;
+  return v;
+end $$;
+
+-- Helpers may be called after act_as (as 'authenticated').
+do $$
+declare f regprocedure;
+begin
+  for f in select p.oid::regprocedure from pg_proc p where p.pronamespace = pg_my_temp_schema() loop
+    execute format('grant execute on function %s to public', f);
+  end loop;
+end $$;
+
+-- The standard test pharmacy: two shops in one organization, plus a second,
+-- unrelated organization to prove data does not leak between customers.
+do $$
+begin
+  perform pg_temp.new_org('org');
+  perform pg_temp.new_shop('shopA', 'org');
+  perform pg_temp.new_shop('shopB', 'org');
+  perform pg_temp.new_staff('admin', 'shopA', 'admin');
+  perform pg_temp.new_staff('pharmacist', 'shopA', 'pharmacist');
+  perform pg_temp.new_staff('cashier', 'shopA', 'cashier');
+  perform pg_temp.new_staff('cashierB', 'shopB', 'cashier');
+
+  perform pg_temp.new_org('otherOrg');
+  perform pg_temp.new_shop('otherShop', 'otherOrg');
+  perform pg_temp.new_staff('otherAdmin', 'otherShop', 'admin');
+
+  perform pg_temp.new_drug('paracetamol');
+  perform pg_temp.receive('batchA', 'shopA', 'paracetamol', 'admin', 100, 50);
+  perform pg_temp.receive('otherBatch', 'otherShop', 'paracetamol', 'otherAdmin', 100, 20);
+end $$;

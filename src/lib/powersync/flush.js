@@ -73,6 +73,10 @@ async function sendStaleFailedSalesToReview(db, stats) {
 }
 
 function isPermanentRejection(error) {
+  // "Change your temporary password first": goes away once the password is
+  // changed, so keep the record queued and retry.
+  if (error?.code === 'PWCHG') return false;
+
   // Business-rule failures raised by our RPCs. Supabase exposes these
   // consistently as PostgreSQL's P0001 code, regardless of the message text,
   // so new server validation cannot accidentally retry forever just because

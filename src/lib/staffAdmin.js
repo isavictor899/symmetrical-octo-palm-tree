@@ -29,7 +29,7 @@ export async function callManageStaff(action, payload = {}) {
 
 // Readable temporary password: no look-alike characters (0/O, 1/l/I), easy to read
 // out loud or write on a slip of paper for a new staff member.
-export function generateTemporaryPassword(length = 10) {
+export function generateTemporaryPassword(length = 12) {
   const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
   const values = new Uint32Array(length);
   crypto.getRandomValues(values);
@@ -44,4 +44,4 @@ export const STAFF_ROLES = [
   { value: 'admin', label: 'Administrator', help: 'Everything, across all shops: staff, reports, finance, settings.' },
 ];
 
-export const MIN_PASSWORD_LENGTH = 8;
+export const MIN_PASSWORD_LENGTH = 10;
