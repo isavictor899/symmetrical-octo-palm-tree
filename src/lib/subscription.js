@@ -37,3 +37,34 @@ export function formatNairobiDate(value) {
 }
 
 export const PLAN_NAMES = { basic: 'Basic', pro: 'Pro', enterprise: 'Enterprise' };
+
+export const STATE_NAMES = {
+  trial: 'Free trial',
+  active: 'Active',
+  complimentary: 'Active',
+  grace: 'Expired, grace period',
+  read_only: 'Expired, read-only',
+  suspended: 'Suspended',
+};
+
+// Optional features a plan may include (same keys as the server's
+// platform_features). Everything else is in every plan.
+export const OPTIONAL_FEATURES = [
+  ['purchase_orders', 'Purchase orders'],
+  ['finance', 'Expenses & income'],
+  ['stock_transfers', 'Transfers between shops'],
+  ['ai_insights', 'AI monthly briefings'],
+  ['advanced_reports', 'Advanced reports (purchase report, profit & loss)'],
+];
+
+export const CORE_FEATURES = 'Sales and receipts, stock and expiry tracking, barcodes, cash register, supplier debts, sales returns and Sales review';
+
+// One short line: "Free trial · ends 12 December 2026".
+export function planStatusLine(subscription) {
+  if (!subscription) return '';
+  const state = STATE_NAMES[subscription.state] || subscription.state;
+  if (subscription.state === 'complimentary' || !subscription.expires_at) return state;
+  if (subscription.state === 'grace') return `${state} until ${formatNairobiDate(subscription.grace_ends_at)}`;
+  if (subscription.state === 'read_only' || subscription.state === 'suspended') return state;
+  return `${state} · ${subscription.state === 'trial' ? 'ends' : 'renews by'} ${formatNairobiDate(subscription.expires_at)}`;
+}

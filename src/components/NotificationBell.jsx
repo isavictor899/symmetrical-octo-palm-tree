@@ -7,6 +7,7 @@ import {
   IconPackageImport,
   IconRefresh,
   IconShoppingCart,
+  IconSpeakerphone,
 } from '@tabler/icons-react';
 import { supabase } from '../lib/supabaseClient';
 
@@ -79,7 +80,7 @@ export default function NotificationBell({ activeShopId, userId, onNavigatePage,
     const expiryLimit = nairobiDate(new Date(now.getTime() + 30 * DAY_MS));
 
     try {
-      const [salesResult, movementsResult, expiryResult, reviewResult] = await Promise.all([
+      const [salesResult, movementsResult, expiryResult, reviewResult, announcementsResult] = await Promise.all([
         supabase.from('sales')
           .select('id, total_amount, sold_at')
           .eq('shop_id', activeShopId)
@@ -103,10 +104,23 @@ export default function NotificationBell({ activeShopId, userId, onNavigatePage,
         // Organization-wide; non-admins get zeros. A failure here must not
         // hide the other notifications.
         supabase.rpc('sales_review_counts').then((result) => result, () => ({ data: null })),
+        // Messages from Enora Labs (maintenance, new features, plan news).
+        supabase.rpc('get_my_announcements').then((result) => result, () => ({ data: null })),
       ]);
 
       const failure = salesResult.error || movementsResult.error || expiryResult.error;
       if (failure) throw failure;
+
+      // Critical first, then warnings, then information (the server orders them).
+      const announcementNotices = (Array.isArray(announcementsResult?.data) ? announcementsResult.data : []).map((announcement) => ({
+        id: `announcement:${announcement.id}`,
+        kind: 'announcement',
+        level: announcement.level,
+        title: announcement.title,
+        detail: announcement.body,
+        at: announcement.starts_at,
+        page: null,
+      }));
 
       const review = Array.isArray(reviewResult?.data) ? reviewResult.data[0] : null;
       const reviewNotices = [];
@@ -174,7 +188,7 @@ export default function NotificationBell({ activeShopId, userId, onNavigatePage,
         }
         return new Date(b.at) - new Date(a.at);
       });
-      setItems([...reviewNotices, ...notices]);
+      setItems([...announcementNotices, ...reviewNotices, ...notices]);
     } catch (loadError) {
       setError(loadError.message || 'Could not load notifications.');
     } finally {
@@ -216,6 +230,8 @@ export default function NotificationBell({ activeShopId, userId, onNavigatePage,
         try { window.localStorage.setItem(storageKey, JSON.stringify([...next].slice(-300))); } catch { /* Storage may be disabled. */ }
       }
     }
+    // Announcements have nowhere to go: reading them in the list is the point.
+    if (!item.page) return;
     setOpen(false);
     if (availablePageKeys.includes(item.page)) onNavigatePage?.(item.page);
   }
@@ -246,13 +262,15 @@ export default function NotificationBell({ activeShopId, userId, onNavigatePage,
           <div className="notification-list" aria-live="polite">
             {error ? <div className="notification-state notification-error">{error}</div>
               : loading && !items.length ? <div className="notification-state">Loading notifications…</div>
-                : !items.length ? <div className="notification-state">No recent sales, receipts, or expiry alerts.</div>
+                : !items.length ? <div className="notification-state">No recent sales, receipts, expiry alerts or messages.</div>
                   : items.map((item) => {
-                    const Icon = item.kind === 'sale' ? IconShoppingCart : item.kind === 'stock' ? IconPackageImport : IconAlertTriangle;
+                    const Icon = item.kind === 'sale' ? IconShoppingCart : item.kind === 'stock' ? IconPackageImport : item.kind === 'announcement' ? IconSpeakerphone : IconAlertTriangle;
                     const unread = !seenIds.has(item.id);
-                    return <button key={item.id} className={`notification-item${unread ? ' unread' : ''}`} type="button" onClick={() => openNotification(item)}>
-                      <span className={`notification-item-icon ${item.kind}`}><Icon size={17} stroke={1.8} /></span>
-                      <span className="notification-item-copy"><strong>{item.title}</strong><span>{item.detail}</span><small><IconClock size={13} /> {item.kind === 'expiry' || item.kind === 'review' ? 'Action needed' : relativeTime(item.at)}</small></span>
+                    const footnote = item.kind === 'announcement' ? `From Enora Labs · ${relativeTime(item.at)}`
+                      : item.kind === 'expiry' || item.kind === 'review' ? 'Action needed' : relativeTime(item.at);
+                    return <button key={item.id} className={`notification-item${unread ? ' unread' : ''}${item.kind === 'announcement' ? ` announcement ${item.level}` : ''}`} type="button" onClick={() => openNotification(item)}>
+                      <span className={`notification-item-icon ${item.kind}${item.level ? ` ${item.level}` : ''}`}><Icon size={17} stroke={1.8} /></span>
+                      <span className="notification-item-copy"><strong>{item.title}</strong><span>{item.detail}</span><small><IconClock size={13} /> {footnote}</small></span>
                       {unread && <span className="notification-unread-dot" aria-label="Unread" />}
                     </button>;
                   })}

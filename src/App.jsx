@@ -33,10 +33,9 @@ import PageErrorBoundary from './components/PageErrorBoundary';
 import NotificationBell from './components/NotificationBell';
 import ChangePassword from './components/ChangePassword';
 import { clearRecentReceipts } from './lib/receipt';
-import { cachedSubscription, fetchSubscription } from './lib/subscription';
+import { cachedSubscription, fetchSubscription, PLAN_NAMES, planStatusLine } from './lib/subscription';
 import { SUPPORT } from './lib/support';
 import SubscriptionBanner from './components/SubscriptionBanner';
-import AnnouncementBar from './components/AnnouncementBar';
 import './App.css';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -551,6 +550,12 @@ export default function App() {
                 <button className="profile-menu-dismiss" type="button" aria-label="Close profile menu" onClick={() => setProfileMenuOpen(false)} />
                 <div className="profile-menu" role="menu">
                   <div className="profile-menu-identity"><strong>{profileName}</strong><small>{session.user.email}</small><span>{profileRole}{activeShop?.name ? ` · ${activeShop.name}` : ''}</span></div>
+                  {subscription ? (
+                    <div className="profile-menu-plan">
+                      <span>{PLAN_NAMES[subscription.plan] || subscription.plan} plan</span>
+                      <small>{planStatusLine(subscription)}</small>
+                    </div>
+                  ) : null}
                   {platformAdmin ? <button type="button" role="menuitem" className="profile-menu-neutral" onClick={() => { setProfileMenuOpen(false); setPlatformView('console'); }}><IconDashboard size={17} /> Enora Labs console</button> : null}
                   <button type="button" role="menuitem" className="profile-menu-neutral" onClick={() => { setProfileMenuOpen(false); setShowPasswordChange(true); }}><IconKey size={17} /> Change password</button>
                   <button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); supabase.auth.signOut(); }}><IconLogout2 size={17} /> Sign out</button>
@@ -560,7 +565,6 @@ export default function App() {
           </header>
           <main className="app-content">
             <SubscriptionBanner subscription={subscription} isAdmin={isAdminRole(staffRole)} />
-            <AnnouncementBar userId={session.user.id} />
             {ActivePageComponent ? (
               <div className="app-page-panel" aria-live="polite">
                 <PageErrorBoundary key={page}>

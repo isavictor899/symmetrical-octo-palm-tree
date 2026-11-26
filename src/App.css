@@ -305,6 +305,13 @@ textarea { resize: vertical; }
 .notification-item-icon.stock { color: #2768b2; background: #e9f1fb; }
 .notification-item-icon.expiry { color: #9a5b00; background: #fff3df; }
 .notification-item-icon.review { color: var(--danger); background: var(--danger-bg); }
+/* Announcements from Enora Labs: full message, coloured by importance. */
+.notification-item.announcement { cursor: default; }
+.notification-item.announcement .notification-item-copy > span { white-space: normal; overflow-wrap: anywhere; line-height: 1.45; }
+.notification-item-icon.announcement { color: #2768b2; background: #e9f1fb; }
+.notification-item-icon.announcement.warning { color: #9a5b00; background: #fff3df; }
+.notification-item-icon.announcement.critical { color: var(--danger); background: var(--danger-bg); }
+.notification-item.announcement.critical .notification-item-copy > strong { color: var(--danger); }
 .notification-item-copy { min-width: 0; display: grid; gap: 2px; flex: 1; }
 .notification-item-copy > strong { font-size: 0.75rem; }
 .notification-item-copy > span { overflow: hidden; color: var(--text-muted); font-size: 0.6875rem; text-overflow: ellipsis; white-space: nowrap; }
@@ -545,12 +552,8 @@ textarea { resize: vertical; }
 .subscription-banner.danger { color: var(--danger); background: var(--danger-bg); }
 @media (max-width: 720px) { .subscription-banner { margin: 10px 12px 0; } }
 
-/* Announcements from Enora Labs */
-.announcement-stack { display: grid; gap: 8px; margin: 12px 24px 0; }
-.announcement { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 10px 14px; border-left: 4px solid; border-radius: var(--radius); font-size: 0.8125rem; line-height: 1.5; }
-.announcement div { display: grid; gap: 2px; }
-.announcement button { flex: 0 0 auto; padding: 3px 10px; border: 1px solid currentColor; border-radius: var(--radius-sm); color: inherit; background: transparent; font-size: 0.75rem; font-weight: 700; cursor: pointer; }
-.announcement.info { color: #1f4f86; background: #e9f1fb; border-color: #2768b2; }
-.announcement.warning { color: var(--warning); background: var(--warning-bg); border-color: var(--warning); }
-.announcement.critical { color: var(--danger); background: var(--danger-bg); border-color: var(--danger); }
-@media (max-width: 720px) { .announcement-stack { margin: 10px 12px 0; } }
+
+/* Plan line in the profile menu */
+.profile-menu-plan { display: grid; gap: 1px; padding: 8px 12px; margin: 0 0 4px; border-bottom: 1px solid var(--border-soft); }
+.profile-menu-plan span { font-size: 0.8125rem; font-weight: 700; }
+.profile-menu-plan small { color: var(--text-muted); font-size: 0.75rem; }

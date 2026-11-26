@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { isAdminRole } from '../lib/roles';
+import PlanCard from './PlanCard';
 import { defaultBrandColor, applyBrandTheme, cacheTheme } from '../lib/theme';
 import {
   applyFontScale,
@@ -159,7 +160,7 @@ function ShopFields({ form, onChange, idPrefix, showColour = true }) {
   );
 }
 
-export default function Settings({ userId, organizationShops = [], activeShopId = null }) {
+export default function Settings({ userId, organizationShops = [], activeShopId = null, subscription = null }) {
   const [allShops, setAllShops] = useState([]);
   const [selectedShopId, setSelectedShopId] = useState(null);
   const [form, setForm] = useState(EMPTY_SHOP);
@@ -360,6 +361,8 @@ export default function Settings({ userId, organizationShops = [], activeShopId 
             <h1>Store settings</h1>
           </div>
         </div>
+
+        <PlanCard subscription={subscription} isAdmin={isAdmin} />
 
         <section className="font-size-settings" aria-labelledby="font-size-heading">
           <div className="font-size-settings-copy">
